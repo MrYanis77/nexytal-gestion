@@ -5,13 +5,21 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Lock, User, Zap } from 'lucide-react';
+import { useLocation } from 'wouter';
 
 export default function Login() {
-  const { login } = useApp();
+  const { login, currentUser } = useApp();
+  const [, navigate] = useLocation();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Si déjà connecté, rediriger immédiatement
+  if (currentUser) {
+    navigate('/dashboard');
+    return null;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,10 +28,12 @@ export default function Login() {
       return;
     }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600));
-    const ok = login(username, password);
+    await new Promise(r => setTimeout(r, 400));
+    const ok = login(username.trim(), password);
     setLoading(false);
-    if (!ok) {
+    if (ok) {
+      navigate('/dashboard');
+    } else {
       toast.error('Identifiants incorrects ou compte inactif.');
     }
   };
@@ -77,6 +87,7 @@ export default function Login() {
                   onChange={e => setUsername(e.target.value)}
                   className="pl-10 bg-secondary border-border text-foreground placeholder:text-muted-foreground/50 focus:border-primary/50 h-11"
                   autoComplete="username"
+                  autoFocus
                 />
               </div>
             </div>

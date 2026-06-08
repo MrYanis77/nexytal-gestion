@@ -28,14 +28,18 @@ function ProtectedRoute({ component: Component, adminOnly = false }: { component
   );
 }
 
-function Router() {
+function LoginRoute() {
   const { currentUser } = useApp();
+  if (currentUser) return <Redirect to="/dashboard" />;
+  return <Login />;
+}
 
+function Router() {
   return (
     <Switch>
-      <Route path="/login" component={Login} />
+      <Route path="/login" component={LoginRoute} />
       <Route path="/">
-        {currentUser ? <Redirect to="/dashboard" /> : <Redirect to="/login" />}
+        <Redirect to="/login" />
       </Route>
       <Route path="/dashboard">
         <ProtectedRoute component={Dashboard} />
