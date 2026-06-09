@@ -1,0 +1,22 @@
+# ============================================================
+# .htaccess - Nexytal Frontend (Vite React SPA)
+# Réécriture URL vers index.html pour le routage client (Wouter)
+# ============================================================
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # 1. Laisser le sous-dossier /api/ gérer ses propres réécritures
+    RewriteRule ^api/ - [L]
+
+    # 2. Si le fichier demandé n'existe pas physiquement...
+    RewriteCond %{REQUEST_FILENAME} !-f
+    # 3. ...et que le dossier demandé n'existe pas non plus...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    # 4. ...rediriger tout le trafic vers index.html pour que le routeur React gère l'affichage
+    RewriteRule . index.html [L]
+</IfModule>
+
+# Optionnel : Bloquer le listing des dossiers
+Options -Indexes

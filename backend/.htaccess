@@ -1,0 +1,52 @@
+# ============================================================
+# .htaccess — Nexytal Backend
+# Réécriture URL vers index.php (front controller)
+# Headers sécurité + blocage accès fichiers sensibles
+# ============================================================
+
+# Activer le moteur de réécriture
+RewriteEngine On
+
+# ---- SÉCURITÉ : bloquer accès aux fichiers sensibles ----
+# Bloquer .git, .env, composer, config/
+RewriteRule ^\.git - [F,L]
+RewriteRule ^\.env - [F,L]
+RewriteRule ^composer\.(json|lock)$ - [F,L]
+RewriteRule ^config/ - [F,L]
+RewriteRule ^core/ - [F,L]
+RewriteRule ^modules/ - [F,L]
+RewriteRule ^sql/ - [F,L]
+
+# ---- FRONT CONTROLLER ----
+# Si le fichier ou dossier existe physiquement, le servir directement
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+# Tout le reste passe par index.php
+RewriteRule ^(.*)$ index.php [QSA,L]
+
+# ---- HEADERS SÉCURITÉ ----
+<IfModule mod_headers.c>
+    # Empêcher le MIME sniffing
+    Header always set X-Content-Type-Options "nosniff"
+    # Empêcher le clickjacking
+    Header always set X-Frame-Options "DENY"
+    # Protection XSS basique (navigateurs anciens)
+    Header always set X-XSS-Protection "1; mode=block"
+    # Referrer policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    # CSP basique
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com"
+    # Supprimer la version PHP
+    Header always unset X-Powered-By
+</IfModule>
+
+# ---- DÉSACTIVER LE LISTING DE RÉPERTOIRE ----
+Options -Indexes
+
+# ---- LIMITER LES MÉTHODES HTTP ----
+<LimitExcept GET POST PUT DELETE OPTIONS>
+    Deny from all
+</LimitExcept>
+
+# ---- CHARSET UTF-8 ----
+AddDefaultCharset UTF-8
