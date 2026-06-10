@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useApp, OffreEmploi, Metier, BlogArticle } from '@/contexts/AppContext';
+import { useFetch } from '@/hooks/useFetch';
+import { api } from '@/lib/api';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
 import { FormModal, ConfirmDelete, FieldDef } from '@/components/FormModal';
@@ -52,54 +54,68 @@ const ARTICLE_FIELDS: FieldDef[] = [
 ];
 
 export default function SiteMedical() {
-  const { data, setData } = useApp();
   const [tab, setTab] = useState('offres');
   const [modal, setModal] = useState<{ type: string; item?: unknown } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; label: string } | null>(null);
 
-  const offres = data.offresEmploi;
-  const metiers = data.metiers;
-  const articles = data.articles.filter(a => a.site === 'medical');
+  const { data: offresData, refetch: refetchO } = useFetch<{ data: OffreEmploi[] }>('/recrutement/offers?site=medical');
+  const { data: metiersData, refetch: refetchM } = useFetch<{ data: Metier[] }>('/recrutement/professions');
+  const { data: articlesData, refetch: refetchA } = useFetch<{ data: BlogArticle[] }>('/blog/posts?site=medical');
 
-  const saveOffre = (raw: Record<string, unknown>) => {
+  const offres = offresData?.data || [];
+  const metiers = metiersData?.data || [];
+  const articles = articlesData?.data || [];
+
+  const saveOffre = async (raw: Record<string, unknown>) => {
     const item = modal?.item as OffreEmploi | undefined;
-    if (item) {
-      setData(d => ({ ...d, offresEmploi: d.offresEmploi.map(o => o.id === item.id ? { ...o, ...raw } as OffreEmploi : o) }));
-      toast.success('Offre mise à jour.');
-    } else {
-      setData(d => ({ ...d, offresEmploi: [...d.offresEmploi, { id: nanoid(8), site: 'medical', ...raw } as OffreEmploi] }));
-      toast.success('Offre créée.');
-    }
+    try {
+      if (item) {
+        await api.put(`/recrutement/offers/${item.id}`, raw);
+        toast.success('Offre mise à jour.');
+      } else {
+        await api.post('/recrutement/offers', { ...raw, site: 'medical' });
+        toast.success('Offre créée.');
+      }
+      refetchO();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const saveMetier = (raw: Record<string, unknown>) => {
+  const saveMetier = async (raw: Record<string, unknown>) => {
     const item = modal?.item as Metier | undefined;
-    if (item) {
-      setData(d => ({ ...d, metiers: d.metiers.map(m => m.id === item.id ? { ...m, ...raw } as Metier : m) }));
-      toast.success('Métier mis à jour.');
-    } else {
-      setData(d => ({ ...d, metiers: [...d.metiers, { id: nanoid(8), ...raw } as Metier] }));
-      toast.success('Métier créé.');
-    }
+    try {
+      if (item) {
+        await api.put(`/recrutement/professions/${item.id}`, raw);
+        toast.success('Métier mis à jour.');
+      } else {
+        await api.post('/recrutement/professions', raw);
+        toast.success('Métier créé.');
+      }
+      refetchM();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const saveArticle = (raw: Record<string, unknown>) => {
+  const saveArticle = async (raw: Record<string, unknown>) => {
     const item = modal?.item as BlogArticle | undefined;
-    if (item) {
-      setData(d => ({ ...d, articles: d.articles.map(a => a.id === item.id ? { ...a, ...raw } as BlogArticle : a) }));
-      toast.success('Article mis à jour.');
-    } else {
-      setData(d => ({ ...d, articles: [...d.articles, { id: nanoid(8), site: 'medical', ...raw } as BlogArticle] }));
-      toast.success('Article créé.');
-    }
+    try {
+      if (item) {
+        await api.put(`/blog/posts/${item.id}`, raw);
+        toast.success('Article mis à jour.');
+      } else {
+        await api.post('/blog/posts', { ...raw, site: 'medical' });
+        toast.success('Article créé.');
+      }
+      refetchA();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.type === 'offre') setData(d => ({ ...d, offresEmploi: d.offresEmploi.filter(o => o.id !== deleteTarget.id) }));
-    if (deleteTarget.type === 'metier') setData(d => ({ ...d, metiers: d.metiers.filter(m => m.id !== deleteTarget.id) }));
-    if (deleteTarget.type === 'article') setData(d => ({ ...d, articles: d.articles.filter(a => a.id !== deleteTarget.id) }));
-    toast.success('Élément supprimé.');
+    try {
+      if (deleteTarget.type === 'offre') { await api.delete(`/recrutement/offers/${deleteTarget.id}`); refetchO(); }
+      if (deleteTarget.type === 'metier') { await api.delete(`/recrutement/professions/${deleteTarget.id}`); refetchM(); }
+      if (deleteTarget.type === 'article') { await api.delete(`/blog/posts/${deleteTarget.id}`); refetchA(); }
+      toast.success('Élément supprimé.');
+    } catch { toast.error('Erreur lors de la suppression.'); }
     setDeleteTarget(null);
   };
 

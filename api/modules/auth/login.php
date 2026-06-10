@@ -11,10 +11,9 @@ function registerAuthLoginRoutes(Router $router): void
     $router->post('/api/admin/login', function () {
         $data = Router::getJsonBody();
 
-        // Validation
+        // Validation — champ "email" = identifiant (ex: admin, admin@nexytal.com)
         Validator::make($data)
-            ->required('email', 'Email')
-            ->email('email', 'Email')
+            ->required('email', 'Identifiant')
             ->required('password', 'Password')
             ->minLength('password', 6, 'Password')
             ->validate();
@@ -70,8 +69,8 @@ function registerAuthLoginRoutes(Router $router): void
         $expiresAt = date('Y-m-d H:i:s', time() + JWT_EXPIRY);
 
         $stmt = $db->prepare(
-            'INSERT INTO core_admin_sessions (admin_id, token, ip_address, user_agent, expires_at, created_at) 
-             VALUES (:admin_id, :token, :ip, :user_agent, :expires_at, NOW())'
+            'INSERT INTO core_admin_sessions (admin_id, token, ip_address, user_agent, expires_at) 
+             VALUES (:admin_id, :token, :ip, :user_agent, :expires_at)'
         );
         $stmt->bindParam(':admin_id', $adminId, PDO::PARAM_INT);
         $stmt->bindParam(':token', $sessionToken, PDO::PARAM_STR);

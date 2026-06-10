@@ -34,17 +34,76 @@ function getDb(): PDO
         try {
             $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (PDOException $e) {
+            error_log('PDO connection failed [' . DB_HOST . '/' . DB_NAME . ']: ' . $e->getMessage());
+
             if (APP_ENV === 'development') {
                 throw $e;
             }
-            // En production, message générique
+
             http_response_code(500);
-            echo json_encode(['error' => 'Database connection failed']);
+            echo json_encode([
+                'success' => false,
+                'error'   => 'Database connection failed',
+                'hint'    => 'Vérifiez DB_HOST, DB_NAME, DB_USER, DB_PASS dans api/config/.env ou config.local.php',
+            ]);
             exit;
         }
     }
 
     return $pdo;
+}
+
+/**
+ * Teste la connexion PDO sans interrompre la requête (diagnostic /health/db).
+ *
+ * @return array{connected:bool,host:string,database:string,user:string,detail?:string,config_sources?:array}
+ */
+function testDbConnection(): array
+{
+    $dsn = sprintf(
+        'mysql:host=%s;port=%d;dbname=%s;charset=%s',
+        DB_HOST,
+        DB_PORT,
+        DB_NAME,
+        DB_CHARSET
+    );
+
+    $options = [
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES   => false,
+        PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
+    ];
+
+    $sources = [
+        'env_file'     => $GLOBALS['_env_loaded_files'] ?? [],
+        'config_local' => is_readable(__DIR__ . '/config.local.php'),
+    ];
+
+    try {
+        $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        $stmt = $pdo->query('SELECT DATABASE() AS db_name');
+        $row = $stmt->fetch();
+
+        return [
+            'connected'       => true,
+            'host'            => DB_HOST,
+            'database'        => $row['db_name'] ?? DB_NAME,
+            'user'            => DB_USER,
+            'config_sources'  => $sources,
+        ];
+    } catch (PDOException $e) {
+        error_log('PDO test connection failed [' . DB_HOST . '/' . DB_NAME . ']: ' . $e->getMessage());
+
+        return [
+            'connected'      => false,
+            'host'           => DB_HOST,
+            'database'       => DB_NAME,
+            'user'           => DB_USER,
+            'detail'         => $e->getMessage(),
+            'config_sources' => $sources,
+        ];
+    }
 }
 
 /**
@@ -107,6 +166,6 @@ function getSiteIdFromDomain(string $domain): ?int
 function getAllSites(): array
 {
     $db = getDb();
-    $stmt = $db->query('SELECT id, name, slug, domain, is_active FROM core_sites WHERE is_active = 1 ORDER BY id');
+    $stmt = $db->query('SELECT id, name, slug, domain FROM core_sites WHERE is_active = 1 ORDER BY id');
     return $stmt->fetchAll();
 }

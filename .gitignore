@@ -10,6 +10,8 @@ build/
 # Environment variables
 .env
 .env.local
+api/config/.env
+api/config/config.local.php
 .env.development.local
 .env.test.local
 .env.production.local

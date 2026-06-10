@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useApp, OffreEmploi, BlogArticle } from '@/contexts/AppContext';
+import { useFetch } from '@/hooks/useFetch';
+import { api } from '@/lib/api';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
 import { FormModal, ConfirmDelete, FieldDef } from '@/components/FormModal';
@@ -50,36 +52,47 @@ export default function SiteRecrutement() {
   const [modal, setModal] = useState<{ type: string; item?: unknown } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; label: string } | null>(null);
 
-  const offres = data.offresIT;
-  const ressources = data.articles.filter(a => a.site === 'recrutement');
+  const { data: offresData, refetch: refetchO } = useFetch<{ data: OffreEmploi[] }>('/recrutement/offers?site=recrutement');
+  const { data: articlesData, refetch: refetchA } = useFetch<{ data: BlogArticle[] }>('/blog/posts?site=recrutement');
 
-  const saveOffre = (raw: Record<string, unknown>) => {
+  const offres = offresData?.data || [];
+  const ressources = articlesData?.data || [];
+
+  const saveOffre = async (raw: Record<string, unknown>) => {
     const item = modal?.item as OffreEmploi | undefined;
-    if (item) {
-      setData(d => ({ ...d, offresIT: d.offresIT.map(o => o.id === item.id ? { ...o, ...raw } as OffreEmploi : o) }));
-      toast.success('Offre mise à jour.');
-    } else {
-      setData(d => ({ ...d, offresIT: [...d.offresIT, { id: nanoid(8), site: 'recrutement', ...raw } as OffreEmploi] }));
-      toast.success('Offre créée.');
-    }
+    try {
+      if (item) {
+        await api.put(`/recrutement/offers/${item.id}`, raw);
+        toast.success('Offre mise à jour.');
+      } else {
+        await api.post('/recrutement/offers', { ...raw, site: 'recrutement' });
+        toast.success('Offre créée.');
+      }
+      refetchO();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const saveRessource = (raw: Record<string, unknown>) => {
+  const saveRessource = async (raw: Record<string, unknown>) => {
     const item = modal?.item as BlogArticle | undefined;
-    if (item) {
-      setData(d => ({ ...d, articles: d.articles.map(a => a.id === item.id ? { ...a, ...raw } as BlogArticle : a) }));
-      toast.success('Ressource mise à jour.');
-    } else {
-      setData(d => ({ ...d, articles: [...d.articles, { id: nanoid(8), site: 'recrutement', ...raw } as BlogArticle] }));
-      toast.success('Ressource créée.');
-    }
+    try {
+      if (item) {
+        await api.put(`/blog/posts/${item.id}`, raw);
+        toast.success('Ressource mise à jour.');
+      } else {
+        await api.post('/blog/posts', { ...raw, site: 'recrutement' });
+        toast.success('Ressource créée.');
+      }
+      refetchA();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.type === 'offre') setData(d => ({ ...d, offresIT: d.offresIT.filter(o => o.id !== deleteTarget.id) }));
-    if (deleteTarget.type === 'ressource') setData(d => ({ ...d, articles: d.articles.filter(a => a.id !== deleteTarget.id) }));
-    toast.success('Élément supprimé.');
+    try {
+      if (deleteTarget.type === 'offre') { await api.delete(`/recrutement/offers/${deleteTarget.id}`); refetchO(); }
+      if (deleteTarget.type === 'ressource') { await api.delete(`/blog/posts/${deleteTarget.id}`); refetchA(); }
+      toast.success('Élément supprimé.');
+    } catch { toast.error('Erreur lors de la suppression.'); }
     setDeleteTarget(null);
   };
 

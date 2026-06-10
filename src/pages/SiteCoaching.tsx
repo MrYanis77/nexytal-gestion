@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useApp, Coach, Creneau, BlogArticle } from '@/contexts/AppContext';
+import { useFetch } from '@/hooks/useFetch';
+import { api } from '@/lib/api';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
 import { FormModal, ConfirmDelete, FieldDef } from '@/components/FormModal';
@@ -49,51 +51,66 @@ export default function SiteCoaching() {
   const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; label: string } | null>(null);
   const [viewCreneau, setViewCreneau] = useState<Creneau | null>(null);
 
-  const coachs = data.coachs;
-  const creneaux = data.creneaux;
-  const articles = data.articles.filter(a => a.site === 'coaching');
+  const { data: coachsData, refetch: refetchC } = useFetch<{ data: Coach[] }>('/coaching/coaches');
+  const { data: creneauxData, refetch: refetchCr } = useFetch<{ data: Creneau[] }>('/coaching/bookings');
+  const { data: articlesData, refetch: refetchA } = useFetch<{ data: BlogArticle[] }>('/blog/posts?site=coaching');
+
+  const coachs = coachsData?.data || [];
+  const creneaux = creneauxData?.data || [];
+  const articles = articlesData?.data || [];
 
   const getCoachName = (id?: string) => coachs.find(c => c.id === id)?.nom ?? '—';
 
-  const saveCoach = (raw: Record<string, unknown>) => {
+  const saveCoach = async (raw: Record<string, unknown>) => {
     const item = modal?.item as Coach | undefined;
-    if (item) {
-      setData(d => ({ ...d, coachs: d.coachs.map(c => c.id === item.id ? { ...c, ...raw } as Coach : c) }));
-      toast.success('Coach mis à jour.');
-    } else {
-      setData(d => ({ ...d, coachs: [...d.coachs, { id: nanoid(8), createdAt: new Date().toISOString().slice(0, 10), specialites: [], certifications: [], langues: [], ...raw } as unknown as Coach] }));
-      toast.success('Coach créé.');
-    }
+    try {
+      if (item) {
+        await api.put(`/coaching/coaches/${item.id}`, raw);
+        toast.success('Coach mis à jour.');
+      } else {
+        await api.post('/coaching/coaches', raw);
+        toast.success('Coach créé.');
+      }
+      refetchC();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const saveCreneau = (raw: Record<string, unknown>) => {
+  const saveCreneau = async (raw: Record<string, unknown>) => {
     const item = modal?.item as Creneau | undefined;
-    if (item) {
-      setData(d => ({ ...d, creneaux: d.creneaux.map(c => c.id === item.id ? { ...c, ...raw } as Creneau : c) }));
-      toast.success('Créneau mis à jour.');
-    } else {
-      setData(d => ({ ...d, creneaux: [...d.creneaux, { id: nanoid(8), ...raw } as Creneau] }));
-      toast.success('Créneau créé.');
-    }
+    try {
+      if (item) {
+        await api.put(`/coaching/bookings/${item.id}`, raw);
+        toast.success('Créneau mis à jour.');
+      } else {
+        await api.post('/coaching/bookings', raw);
+        toast.success('Créneau créé.');
+      }
+      refetchCr();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const saveArticle = (raw: Record<string, unknown>) => {
+  const saveArticle = async (raw: Record<string, unknown>) => {
     const item = modal?.item as BlogArticle | undefined;
-    if (item) {
-      setData(d => ({ ...d, articles: d.articles.map(a => a.id === item.id ? { ...a, ...raw } as BlogArticle : a) }));
-      toast.success('Article mis à jour.');
-    } else {
-      setData(d => ({ ...d, articles: [...d.articles, { id: nanoid(8), site: 'coaching', ...raw } as BlogArticle] }));
-      toast.success('Article créé.');
-    }
+    try {
+      if (item) {
+        await api.put(`/blog/posts/${item.id}`, raw);
+        toast.success('Article mis à jour.');
+      } else {
+        await api.post('/blog/posts', { ...raw, site: 'coaching' });
+        toast.success('Article créé.');
+      }
+      refetchA();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.type === 'coach') setData(d => ({ ...d, coachs: d.coachs.filter(c => c.id !== deleteTarget.id) }));
-    if (deleteTarget.type === 'creneau') setData(d => ({ ...d, creneaux: d.creneaux.filter(c => c.id !== deleteTarget.id) }));
-    if (deleteTarget.type === 'article') setData(d => ({ ...d, articles: d.articles.filter(a => a.id !== deleteTarget.id) }));
-    toast.success('Élément supprimé.');
+    try {
+      if (deleteTarget.type === 'coach') { await api.delete(`/coaching/coaches/${deleteTarget.id}`); refetchC(); }
+      if (deleteTarget.type === 'creneau') { await api.delete(`/coaching/bookings/${deleteTarget.id}`); refetchCr(); }
+      if (deleteTarget.type === 'article') { await api.delete(`/blog/posts/${deleteTarget.id}`); refetchA(); }
+      toast.success('Élément supprimé.');
+    } catch { toast.error('Erreur lors de la suppression.'); }
     setDeleteTarget(null);
   };
 

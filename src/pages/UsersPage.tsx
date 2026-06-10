@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useApp, User, Role, SiteId } from '@/contexts/AppContext';
+import { useFetch } from '@/hooks/useFetch';
+import { api } from '@/lib/api';
 import { DataTable } from '@/components/DataTable';
 import { ConfirmDelete } from '@/components/FormModal';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -46,20 +48,14 @@ interface UserForm {
 
 const DEFAULT_FORM: UserForm = { username: '', email: '', role: 'user', sites: [], active: true, password: '' };
 
-const CREDENTIALS_KEY = 'nexytal_credentials';
-
-function loadCredentials(): Record<string, string> {
-  try { return JSON.parse(localStorage.getItem(CREDENTIALS_KEY) ?? '{}'); } catch { return {}; }
-}
-function saveCredentials(creds: Record<string, string>) {
-  localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(creds));
-}
-
 export default function UsersPage() {
-  const { users, setUsers, currentUser } = useApp();
+  const { currentUser } = useApp();
   const [modal, setModal] = useState<{ item?: User } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
   const [form, setForm] = useState<UserForm>(DEFAULT_FORM);
+
+  const { data: usersData, refetch } = useFetch<{ data: User[] }>('/users');
+  const users = usersData?.data || [];
 
   const openAdd = () => { setForm(DEFAULT_FORM); setModal({}); };
   const openEdit = (u: User) => {
@@ -67,43 +63,36 @@ export default function UsersPage() {
     setModal({ item: u });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.username || !form.email) { toast.error('Identifiant et email requis.'); return; }
-    const creds = loadCredentials();
 
-    if (modal?.item) {
-      // Edit
-      if (form.password) creds[form.username] = form.password;
-      if (form.username !== modal.item.username) {
-        delete creds[modal.item.username];
-        if (form.password) creds[form.username] = form.password;
+    try {
+      if (modal?.item) {
+        // Edit
+        await api.put(`/users/${modal.item.id}`, form);
+        toast.success('Utilisateur mis à jour.');
+      } else {
+        // Create
+        if (!form.password) { toast.error('Mot de passe requis pour un nouvel utilisateur.'); return; }
+        await api.post('/users', form);
+        toast.success('Utilisateur créé.');
       }
-      saveCredentials(creds);
-      setUsers(us => us.map(u => u.id === modal.item!.id ? { ...u, ...form } : u));
-      toast.success('Utilisateur mis à jour.');
-    } else {
-      // Create
-      if (!form.password) { toast.error('Mot de passe requis pour un nouvel utilisateur.'); return; }
-      if (users.find(u => u.username === form.username)) { toast.error('Identifiant déjà utilisé.'); return; }
-      creds[form.username] = form.password;
-      saveCredentials(creds);
-      const newUser: User = { id: nanoid(8), createdAt: new Date().toISOString().slice(0, 10), avatar: undefined, ...form };
-      setUsers(us => [...us, newUser]);
-      toast.success('Utilisateur créé.');
+      refetch();
+      setModal(null);
+    } catch {
+      toast.error('Erreur lors de la sauvegarde.');
     }
-    setModal(null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    const user = users.find(u => u.id === deleteTarget.id);
-    if (user) {
-      const creds = loadCredentials();
-      delete creds[user.username];
-      saveCredentials(creds);
+    try {
+      await api.delete(`/users/${deleteTarget.id}`);
+      toast.success('Utilisateur supprimé.');
+      refetch();
+    } catch {
+      toast.error('Erreur lors de la suppression.');
     }
-    setUsers(us => us.filter(u => u.id !== deleteTarget.id));
-    toast.success('Utilisateur supprimé.');
     setDeleteTarget(null);
   };
 

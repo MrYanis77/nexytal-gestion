@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useApp, Formation, BlogArticle } from '@/contexts/AppContext';
+import { useFetch } from '@/hooks/useFetch';
+import { api } from '@/lib/api';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
 import { FormModal, ConfirmDelete, FieldDef } from '@/components/FormModal';
@@ -52,50 +54,70 @@ const ARTICLE_FIELDS: FieldDef[] = [
 ];
 
 export default function SiteFormation() {
-  const { data, setData } = useApp();
   const [tab, setTab] = useState('formations');
   const [modal, setModal] = useState<{ type: 'formation' | 'article'; item?: Formation | BlogArticle } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; label: string } | null>(null);
 
-  const formations = data.formations;
-  const articles = data.articles.filter(a => a.site === 'formation');
+  const { data: formationsData, loading: loadingF, refetch: refetchF } = useFetch<{ data: Formation[] }>('/formation/courses');
+  const { data: articlesData, loading: loadingA, refetch: refetchA } = useFetch<{ data: BlogArticle[] }>('/blog/posts?site=formation');
+
+  const formations = formationsData?.data || [];
+  const articles = articlesData?.data || [];
 
   // ─── Formations ───────────────────────────────────────────────────────────
 
-  const saveFormation = (raw: Record<string, unknown>) => {
+  const saveFormation = async (raw: Record<string, unknown>) => {
     const item = modal?.item as Formation | undefined;
-    if (item) {
-      setData(d => ({ ...d, formations: d.formations.map(f => f.id === item.id ? { ...f, ...raw } as Formation : f) }));
-      toast.success('Formation mise à jour.');
-    } else {
-      const newF: Formation = { id: nanoid(8), createdAt: new Date().toISOString().slice(0, 10), ...raw } as Formation;
-      setData(d => ({ ...d, formations: [...d.formations, newF] }));
-      toast.success('Formation créée.');
+    try {
+      if (item) {
+        await api.put(`/formation/courses/${item.id}`, raw);
+        toast.success('Formation mise à jour.');
+      } else {
+        await api.post('/formation/courses', raw);
+        toast.success('Formation créée.');
+      }
+      refetchF();
+    } catch (err) {
+      toast.error('Erreur lors de la sauvegarde.');
     }
   };
 
-  const deleteFormation = (id: string) => {
-    setData(d => ({ ...d, formations: d.formations.filter(f => f.id !== id) }));
-    toast.success('Formation supprimée.');
+  const deleteFormation = async (id: string) => {
+    try {
+      await api.delete(`/formation/courses/${id}`);
+      toast.success('Formation supprimée.');
+      refetchF();
+    } catch (err) {
+      toast.error('Erreur lors de la suppression.');
+    }
   };
 
   // ─── Articles ─────────────────────────────────────────────────────────────
 
-  const saveArticle = (raw: Record<string, unknown>) => {
+  const saveArticle = async (raw: Record<string, unknown>) => {
     const item = modal?.item as BlogArticle | undefined;
-    if (item) {
-      setData(d => ({ ...d, articles: d.articles.map(a => a.id === item.id ? { ...a, ...raw } as BlogArticle : a) }));
-      toast.success('Article mis à jour.');
-    } else {
-      const newA: BlogArticle = { id: nanoid(8), site: 'formation', ...raw } as BlogArticle;
-      setData(d => ({ ...d, articles: [...d.articles, newA] }));
-      toast.success('Article créé.');
+    try {
+      if (item) {
+        await api.put(`/blog/posts/${item.id}`, raw);
+        toast.success('Article mis à jour.');
+      } else {
+        await api.post('/blog/posts', { ...raw, site: 'formation' });
+        toast.success('Article créé.');
+      }
+      refetchA();
+    } catch (err) {
+      toast.error('Erreur lors de la sauvegarde.');
     }
   };
 
-  const deleteArticle = (id: string) => {
-    setData(d => ({ ...d, articles: d.articles.filter(a => a.id !== id) }));
-    toast.success('Article supprimé.');
+  const deleteArticle = async (id: string) => {
+    try {
+      await api.delete(`/blog/posts/${id}`);
+      toast.success('Article supprimé.');
+      refetchA();
+    } catch (err) {
+      toast.error('Erreur lors de la suppression.');
+    }
   };
 
   return (

@@ -1,4 +1,6 @@
 import { useApp } from '@/contexts/AppContext';
+import { useFetch } from '@/hooks/useFetch';
+import { api } from '@/lib/api';
 import { Link } from 'wouter';
 import { GraduationCap, Stethoscope, Briefcase, TrendingUp, Heart, BookOpen, ArrowRight, FileText, Users, Calendar } from 'lucide-react';
 
@@ -60,20 +62,26 @@ const SITES = [
 ];
 
 export default function Dashboard() {
-  const { currentUser, data, canAccessSite } = useApp();
+  const { currentUser, canAccessSite } = useApp();
+
+  // Pour les statistiques, dans un cas réel on aurait une route /api/dashboard/stats
+  // Ici on fait quelques requêtes rapides pour les longueurs ou on met des placeholders
+  const { data: formations } = useFetch<{ data: unknown[] }>('/formation/courses');
+  const { data: articles } = useFetch<{ data: any[] }>('/blog/posts');
+  const { data: coaches } = useFetch<{ data: unknown[] }>('/coaching/coaches');
 
   const stats = [
-    { label: 'Formations', value: data.formations.length, icon: GraduationCap, color: '#7C3AED' },
-    { label: 'Offres Santé', value: data.offresEmploi.length, icon: Stethoscope, color: '#059669' },
-    { label: 'Offres IT', value: data.offresIT.length, icon: Briefcase, color: '#2563EB' },
-    { label: 'Articles', value: data.articles.length, icon: FileText, color: '#D97706' },
-    { label: 'Coachs', value: data.coachs.length, icon: Heart, color: '#DC2626' },
-    { label: 'Formateurs', value: data.formateurs.length, icon: BookOpen, color: '#0891B2' },
-    { label: 'Créneaux', value: data.creneaux.length, icon: Calendar, color: '#6366F1' },
-    { label: 'Métiers', value: data.metiers.length, icon: Users, color: '#EC4899' },
+    { label: 'Formations', value: formations?.data?.length || 0, icon: GraduationCap, color: '#7C3AED' },
+    { label: 'Offres Santé', value: 0, icon: Stethoscope, color: '#059669' }, // TODO: Fetch
+    { label: 'Offres IT', value: 0, icon: Briefcase, color: '#2563EB' }, // TODO: Fetch
+    { label: 'Articles', value: articles?.data?.length || 0, icon: FileText, color: '#D97706' },
+    { label: 'Coachs', value: coaches?.data?.length || 0, icon: Heart, color: '#DC2626' },
+    { label: 'Formateurs', value: 0, icon: BookOpen, color: '#0891B2' },
+    { label: 'Créneaux', value: 0, icon: Calendar, color: '#6366F1' },
+    { label: 'Métiers', value: 0, icon: Users, color: '#EC4899' },
   ];
 
-  const recentArticles = [...data.articles].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const recentArticles = (articles?.data || []).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
 
   return (
     <div className="p-6 space-y-8 fade-up">

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useApp, BlogArticle } from '@/contexts/AppContext';
+import { useFetch } from '@/hooks/useFetch';
+import { api } from '@/lib/api';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
 import { FormModal, ConfirmDelete, FieldDef } from '@/components/FormModal';
@@ -29,25 +31,32 @@ export default function SiteCarriere() {
   const [modal, setModal] = useState<{ item?: BlogArticle } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
 
-  const articles = data.articles.filter(a => a.site === 'carriere');
+  const { data: articlesData, refetch } = useFetch<{ data: BlogArticle[] }>('/blog/posts?site=carriere');
+  const articles = articlesData?.data || [];
 
   const publie = articles.filter(a => a.statut === 'publie').length;
   const brouillon = articles.filter(a => a.statut === 'brouillon').length;
 
-  const saveArticle = (raw: Record<string, unknown>) => {
-    if (modal?.item) {
-      setData(d => ({ ...d, articles: d.articles.map(a => a.id === modal.item!.id ? { ...a, ...raw } as BlogArticle : a) }));
-      toast.success('Article mis à jour.');
-    } else {
-      setData(d => ({ ...d, articles: [...d.articles, { id: nanoid(8), site: 'carriere', ...raw } as BlogArticle] }));
-      toast.success('Article créé.');
-    }
+  const saveArticle = async (raw: Record<string, unknown>) => {
+    try {
+      if (modal?.item) {
+        await api.put(`/blog/posts/${modal.item.id}`, raw);
+        toast.success('Article mis à jour.');
+      } else {
+        await api.post('/blog/posts', { ...raw, site: 'carriere' });
+        toast.success('Article créé.');
+      }
+      refetch();
+    } catch { toast.error('Erreur lors de la sauvegarde.'); }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    setData(d => ({ ...d, articles: d.articles.filter(a => a.id !== deleteTarget.id) }));
-    toast.success('Article supprimé.');
+    try {
+      await api.delete(`/blog/posts/${deleteTarget.id}`);
+      toast.success('Article supprimé.');
+      refetch();
+    } catch { toast.error('Erreur lors de la suppression.'); }
     setDeleteTarget(null);
   };
 

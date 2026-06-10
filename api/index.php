@@ -67,6 +67,39 @@ $router->get('/api/health', function () {
     ]);
 });
 
+$router->get('/api/health/db', function () {
+    $result = testDbConnection();
+
+    if ($result['connected']) {
+        Response::success([
+            'status'          => 'ok',
+            'connected'       => true,
+            'host'            => $result['host'],
+            'database'        => $result['database'],
+            'user'            => $result['user'],
+            'config_sources'  => $result['config_sources'] ?? null,
+        ]);
+    }
+
+    $payload = [
+        'status'         => 'error',
+        'connected'      => false,
+        'host'           => $result['host'],
+        'database'       => $result['database'],
+        'user'           => $result['user'],
+        'config_sources' => $result['config_sources'] ?? null,
+        'hint'           => 'Vérifiez DB_HOST, DB_NAME, DB_USER, DB_PASS dans api/config/.env ou config.local.php',
+    ];
+
+    if (!empty($result['detail'])) {
+        $payload['detail'] = $result['detail'];
+    }
+
+    http_response_code(500);
+    echo json_encode(['success' => false, 'error' => 'Database connection failed', 'data' => $payload]);
+    exit;
+});
+
 // ===== ENREGISTREMENT DES ROUTES =====
 
 // --- Module Auth ---
@@ -148,8 +181,8 @@ registerPublicCoachingRoutes($router);
 // --- Module Marketing ---
 require_once __DIR__ . '/modules/marketing/newsletter.php';
 require_once __DIR__ . '/modules/marketing/email_logs.php';
-registerNewsletterRoutes($router);
-registerEmailLogsRoutes($router);
+registerMarketingNewsletterRoutes($router);
+registerMarketingEmailLogsRoutes($router);
 
 // --- Module GDPR ---
 require_once __DIR__ . '/modules/gdpr/consents.php';

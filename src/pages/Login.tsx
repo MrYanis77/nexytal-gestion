@@ -29,12 +29,12 @@ export default function Login() {
     }
     setLoading(true);
     await new Promise(r => setTimeout(r, 400));
-    const ok = login(username.trim(), password);
+    const result = await login(username.trim(), password);
     setLoading(false);
-    if (ok) {
+    if (result.ok) {
       navigate('/dashboard');
     } else {
-      toast.error('Identifiants incorrects ou compte inactif.');
+      toast.error(result.error || 'Identifiants incorrects ou compte inactif.');
     }
   };
 
@@ -82,7 +82,7 @@ export default function Login() {
                 <Input
                   id="username"
                   type="text"
-                  placeholder="superadmin"
+                  placeholder="admin"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
                   className="pl-10 bg-secondary border-border text-foreground placeholder:text-muted-foreground/50 focus:border-primary/50 h-11"
@@ -132,12 +132,6 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* Hint */}
-          <div className="mt-6 p-3 rounded-lg border border-border/50 bg-secondary/50">
-            <p className="text-xs text-muted-foreground text-center">
-              Accès démo : <span className="font-mono text-foreground/70">superadmin</span> / <span className="font-mono text-foreground/70">Nexytal@2024!</span>
-            </p>
-          </div>
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
