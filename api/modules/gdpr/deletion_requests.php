@@ -1,6 +1,6 @@
 <?php
 /**
- * modules/gdpr/deletion_requests.php — CRUD gdpr_deletion_requests
+ * modules/gdpr/deletion_requests.php — CRUD gdpr_deletion_requests (v3)
  */
 
 function registerGdprDeletionRequestsRoutes(Router $router): void
@@ -10,7 +10,7 @@ function registerGdprDeletionRequestsRoutes(Router $router): void
         Middleware::requireRole(['superadmin', 'admin']);
         $db = getDb();
         $pagination = Router::getPagination();
-        
+
         $where = ['site_id = :site_id'];
         $params = [':site_id' => $siteId];
 
@@ -27,9 +27,9 @@ function registerGdprDeletionRequestsRoutes(Router $router): void
         $total = (int) $stmt->fetch()['total'];
 
         $stmt = $db->prepare(
-            "SELECT * FROM gdpr_deletion_requests 
-             $whereClause 
-             ORDER BY created_at DESC 
+            "SELECT * FROM gdpr_deletion_requests
+             $whereClause
+             ORDER BY created_at DESC
              LIMIT :limit OFFSET :offset"
         );
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);
@@ -47,7 +47,7 @@ function registerGdprDeletionRequestsRoutes(Router $router): void
         $db = getDb();
         $id = (int) $params['id'];
 
-        Validator::make($data)->required('status', 'Status')->in('status', ['pending', 'processed', 'rejected'], 'Status')->validate();
+        Validator::make($data)->required('status', 'Status')->in('status', ['pending', 'processed', 'rejected', 'completed'], 'Status')->validate();
 
         $stmt = $db->prepare('SELECT * FROM gdpr_deletion_requests WHERE id = :id AND site_id = :site_id LIMIT 1');
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
@@ -56,10 +56,20 @@ function registerGdprDeletionRequestsRoutes(Router $router): void
         $old = $stmt->fetch();
         if (!$old) { Response::notFound('Request not found'); return; }
 
-        $stmt = $db->prepare('UPDATE gdpr_deletion_requests SET status = :status, resolved_at = :resolved, updated_at = NOW() WHERE id = :id');
+        $resolved = in_array($data['status'], ['processed', 'rejected', 'completed'], true) ? date('Y-m-d H:i:s') : null;
+        $processedAt = in_array($data['status'], ['processed', 'completed'], true) ? date('Y-m-d H:i:s') : null;
+
+        $stmt = $db->prepare(
+            'UPDATE gdpr_deletion_requests
+             SET status = :status, resolved_at = :resolved, processed_at = COALESCE(:processed, processed_at),
+                 processed_by = COALESCE(:processed_by, processed_by), updated_at = NOW()
+             WHERE id = :id'
+        );
         $stmt->bindParam(':status', $data['status'], PDO::PARAM_STR);
-        $resolved = in_array($data['status'], ['processed', 'rejected']) ? date('Y-m-d H:i:s') : null;
         $stmt->bindParam(':resolved', $resolved, PDO::PARAM_STR);
+        $stmt->bindParam(':processed', $processedAt, PDO::PARAM_STR);
+        $processedBy = (int) $admin['id'];
+        $stmt->bindParam(':processed_by', $processedBy, PDO::PARAM_INT);
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
 
@@ -79,18 +89,23 @@ function registerGdprDeletionRequestsRoutes(Router $router): void
             ->validate();
 
         $db = getDb();
+        $details = $data['details'] ?? $data['reason'] ?? null;
+        $userType = $data['user_type'] ?? 'other';
+
         $stmt = $db->prepare(
-            'INSERT INTO gdpr_deletion_requests (site_id, email, first_name, last_name, request_type, details, status, created_at)
-             VALUES (:site_id, :email, :fn, :ln, :rtype, :details, :status, NOW())'
+            'INSERT INTO gdpr_deletion_requests
+             (site_id, user_type, user_email, first_name, last_name, request_type, reason, details, status, created_at)
+             VALUES (:site_id, :user_type, :email, :fn, :ln, :rtype, :reason, :details, :status, NOW())'
         );
         $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
+        $stmt->bindParam(':user_type', $userType, PDO::PARAM_STR);
         $stmt->bindParam(':email', $data['email'], PDO::PARAM_STR);
         $fn = $data['first_name'] ?? null;
         $stmt->bindParam(':fn', $fn, PDO::PARAM_STR);
         $ln = $data['last_name'] ?? null;
         $stmt->bindParam(':ln', $ln, PDO::PARAM_STR);
         $stmt->bindParam(':rtype', $data['request_type'], PDO::PARAM_STR);
-        $details = $data['details'] ?? null;
+        $stmt->bindParam(':reason', $details, PDO::PARAM_STR);
         $stmt->bindParam(':details', $details, PDO::PARAM_STR);
         $status = 'pending';
         $stmt->bindParam(':status', $status, PDO::PARAM_STR);

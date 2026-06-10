@@ -88,8 +88,11 @@ function registerRecrutementOffersRoutes(Router $router): void
 
         Validator::make($data)
             ->required('title', 'Title')
-            ->required('job_id', 'Job')
             ->required('contract_type_id', 'Contract Type')
+            ->required('company_name', 'Company name')
+            ->required('location', 'Location')
+            ->required('short_desc', 'Short description')
+            ->required('full_desc', 'Full description')
             ->validate();
 
         $slug = $data['slug'] ?? Validator::slugify($data['title']);
@@ -104,7 +107,9 @@ function registerRecrutementOffersRoutes(Router $router): void
                  (:site_id, :job_id, :contract_type_id, :profession_id, :title, :slug, :company_name, :location, :postal_code, :salary_range, :experience_level, :duration, :is_urgent, :short_desc, :full_desc, :status, :published_at, :expires_at, :created_by, NOW())'
             );
             $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-            $stmt->bindParam(':job_id', $data['job_id'], PDO::PARAM_INT);
+            $jobId = isset($data['job_id']) && $data['job_id'] !== '' && $data['job_id'] !== null
+                ? (int) $data['job_id'] : null;
+            $stmt->bindValue(':job_id', $jobId, $jobId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindParam(':contract_type_id', $data['contract_type_id'], PDO::PARAM_INT);
             $profId = $data['profession_id'] ?? null;
             $stmt->bindParam(':profession_id', $profId, PDO::PARAM_INT);

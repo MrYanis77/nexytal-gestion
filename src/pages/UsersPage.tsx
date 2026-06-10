@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useApp, User, Role, SiteId } from '@/contexts/AppContext';
 import { useFetch } from '@/hooks/useFetch';
 import { api } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import { userFromApi, userToApi } from '@/lib/mappers';
 import { DataTable } from '@/components/DataTable';
 import { ConfirmDelete } from '@/components/FormModal';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -11,11 +13,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Users, Shield, UserCheck, UserX } from 'lucide-react';
 import { toast } from 'sonner';
-import { nanoid } from 'nanoid';
 
 const SITES: { id: SiteId; label: string; color: string }[] = [
   { id: 'formation', label: 'Alt Formation', color: '#7C3AED' },
@@ -26,19 +26,25 @@ const SITES: { id: SiteId; label: string; color: string }[] = [
   { id: 'trainer', label: 'Nexytal Trainer', color: '#0891B2' },
 ];
 
-const ROLE_COLORS: Record<Role, string> = {
+const ROLE_COLORS: Partial<Record<Role, string>> = {
   superadmin: 'bg-purple-500/20 text-purple-300',
   admin: 'bg-blue-500/20 text-blue-300',
-  user: 'bg-green-500/20 text-green-300',
+  editor: 'bg-green-500/20 text-green-300',
+  moderator: 'bg-amber-500/20 text-amber-300',
+  recruiter: 'bg-cyan-500/20 text-cyan-300',
 };
-const ROLE_LABELS: Record<Role, string> = {
+
+const ROLE_LABELS: Partial<Record<Role, string>> = {
   superadmin: 'Super Admin',
   admin: 'Administrateur',
-  user: 'Utilisateur',
+  editor: 'Éditeur',
+  moderator: 'Modérateur',
+  recruiter: 'Recruteur',
 };
 
 interface UserForm {
-  username: string;
+  first_name: string;
+  last_name: string;
   email: string;
   role: Role;
   sites: SiteId[];
@@ -46,7 +52,15 @@ interface UserForm {
   password: string;
 }
 
-const DEFAULT_FORM: UserForm = { username: '', email: '', role: 'user', sites: [], active: true, password: '' };
+const DEFAULT_FORM: UserForm = {
+  first_name: '',
+  last_name: '',
+  email: '',
+  role: 'editor',
+  sites: [],
+  active: true,
+  password: '',
+};
 
 export default function UsersPage() {
   const { currentUser } = useApp();
@@ -54,33 +68,46 @@ export default function UsersPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
   const [form, setForm] = useState<UserForm>(DEFAULT_FORM);
 
-  const { data: usersData, refetch } = useFetch<{ data: User[] }>('/users');
-  const users = usersData?.data || [];
+  const { data: usersData, refetch } = useFetch<{ data: Record<string, unknown>[] }>('/users');
+  const users = useMemo(() => (usersData?.data ?? []).map(userFromApi), [usersData]);
 
   const openAdd = () => { setForm(DEFAULT_FORM); setModal({}); };
   const openEdit = (u: User) => {
-    setForm({ username: u.username, email: u.email, role: u.role, sites: u.sites, active: u.active, password: '' });
+    setForm({
+      first_name: u.first_name ?? u.username.split(' ')[0] ?? '',
+      last_name: u.last_name ?? u.username.split(' ').slice(1).join(' ') ?? '',
+      email: u.email,
+      role: u.role === 'user' ? 'editor' : u.role,
+      sites: u.sites,
+      active: u.active,
+      password: '',
+    });
     setModal({ item: u });
   };
 
   const handleSave = async () => {
-    if (!form.username || !form.email) { toast.error('Identifiant et email requis.'); return; }
+    if (!form.email || !form.first_name || !form.last_name) {
+      toast.error('Prénom, nom et email requis.');
+      return;
+    }
 
     try {
+      const payload = userToApi(form);
       if (modal?.item) {
-        // Edit
-        await api.put(`/users/${modal.item.id}`, form);
+        await api.put(`/users/${modal.item.id}`, payload);
         toast.success('Utilisateur mis à jour.');
       } else {
-        // Create
-        if (!form.password) { toast.error('Mot de passe requis pour un nouvel utilisateur.'); return; }
-        await api.post('/users', form);
+        if (!form.password) {
+          toast.error('Mot de passe requis pour un nouvel utilisateur.');
+          return;
+        }
+        await api.post('/users', payload);
         toast.success('Utilisateur créé.');
       }
       refetch();
       setModal(null);
-    } catch {
-      toast.error('Erreur lors de la sauvegarde.');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
     }
   };
 
@@ -88,10 +115,10 @@ export default function UsersPage() {
     if (!deleteTarget) return;
     try {
       await api.delete(`/users/${deleteTarget.id}`);
-      toast.success('Utilisateur supprimé.');
+      toast.success('Utilisateur désactivé.');
       refetch();
-    } catch {
-      toast.error('Erreur lors de la suppression.');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la suppression.'));
     }
     setDeleteTarget(null);
   };
@@ -112,18 +139,16 @@ export default function UsersPage() {
 
   return (
     <div className="p-6 space-y-6 fade-up">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#2563EB20' }}>
           <Users className="w-5 h-5 text-blue-400" />
         </div>
         <div>
           <h1 className="text-xl font-bold text-foreground" style={{ fontFamily: 'Space Grotesk' }}>Gestion des utilisateurs</h1>
-          <p className="text-xs text-muted-foreground">Créez et gérez les accès à l'application</p>
+          <p className="text-xs text-muted-foreground">Comptes admin alignés sur core_admin_users</p>
         </div>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {stats.map(s => (
           <div key={s.label} className="rounded-xl border border-border p-4 bg-card">
@@ -138,7 +163,6 @@ export default function UsersPage() {
         ))}
       </div>
 
-      {/* Table */}
       <DataTable<User>
         data={users}
         accentColor="#2563EB"
@@ -152,7 +176,7 @@ export default function UsersPage() {
             <div className="flex items-center gap-2.5">
               <Avatar className="w-7 h-7 flex-shrink-0">
                 <AvatarFallback className="text-xs font-bold" style={{ background: '#2563EB30', color: '#60a5fa' }}>
-                  {u.username.slice(0, 2).toUpperCase()}
+                  {(u.first_name?.[0] ?? u.username[0] ?? '?').toUpperCase()}
                 </AvatarFallback>
               </Avatar>
               <div>
@@ -162,8 +186,8 @@ export default function UsersPage() {
             </div>
           )},
           { key: 'role', label: 'Rôle', render: u => (
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLORS[u.role]}`}>
-              {ROLE_LABELS[u.role]}
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLORS[u.role] ?? 'bg-secondary text-muted-foreground'}`}>
+              {ROLE_LABELS[u.role] ?? u.role}
             </span>
           )},
           { key: 'sites', label: 'Sites', render: u => (
@@ -193,7 +217,6 @@ export default function UsersPage() {
         ]}
       />
 
-      {/* User Modal */}
       <Dialog open={modal !== null} onOpenChange={v => !v && setModal(null)}>
         <DialogContent className="max-w-lg bg-card border-border text-foreground max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -205,15 +228,21 @@ export default function UsersPage() {
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-sm text-foreground/80 mb-1.5 block">Identifiant *</Label>
-                <Input value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-                  placeholder="ex. admin_site" className="bg-secondary border-border h-9" />
+                <Label className="text-sm text-foreground/80 mb-1.5 block">Prénom *</Label>
+                <Input value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))}
+                  className="bg-secondary border-border h-9" />
               </div>
               <div>
-                <Label className="text-sm text-foreground/80 mb-1.5 block">Email *</Label>
-                <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  placeholder="email@nexytal.fr" className="bg-secondary border-border h-9" />
+                <Label className="text-sm text-foreground/80 mb-1.5 block">Nom *</Label>
+                <Input value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))}
+                  className="bg-secondary border-border h-9" />
               </div>
+            </div>
+
+            <div>
+              <Label className="text-sm text-foreground/80 mb-1.5 block">Email *</Label>
+              <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                placeholder="email@nexytal.fr" className="bg-secondary border-border h-9" />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -226,7 +255,9 @@ export default function UsersPage() {
                   <SelectContent className="bg-card border-border text-foreground">
                     <SelectItem value="superadmin">Super Admin</SelectItem>
                     <SelectItem value="admin">Administrateur</SelectItem>
-                    <SelectItem value="user">Utilisateur</SelectItem>
+                    <SelectItem value="editor">Éditeur</SelectItem>
+                    <SelectItem value="moderator">Modérateur</SelectItem>
+                    <SelectItem value="recruiter">Recruteur</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

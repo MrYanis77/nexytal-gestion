@@ -88,7 +88,7 @@ $router->get('/api/health/db', function () {
         'database'       => $result['database'],
         'user'           => $result['user'],
         'config_sources' => $result['config_sources'] ?? null,
-        'hint'           => 'Vérifiez DB_HOST, DB_NAME, DB_USER, DB_PASS dans api/config/.env ou config.local.php',
+        'hint'           => 'Vérifiez DB_PASSWORD dans api/config/.env (Ionos → Bases de données → réinitialiser dbu977482)',
     ];
 
     if (!empty($result['detail'])) {
@@ -99,6 +99,9 @@ $router->get('/api/health/db', function () {
     echo json_encode(['success' => false, 'error' => 'Database connection failed', 'data' => $payload]);
     exit;
 });
+
+require_once __DIR__ . '/modules/health/insert_tests.php';
+registerHealthInsertRoutes($router);
 
 // ===== ENREGISTREMENT DES ROUTES =====
 

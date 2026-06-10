@@ -10,4 +10,4 @@ define('DB_HOST', 'db5020658636.hosting-data.io');
 define('DB_PORT', 3306);
 define('DB_NAME', 'dbs15772578');
 define('DB_USER', 'dbu977482');
-define('DB_PASS', 'votre_mot_de_passe_ionos');
+// Ne pas mettre le mot de passe ici — utilisez api/config/.env → DB_PASSWORD

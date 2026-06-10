@@ -18,6 +18,10 @@ function loadEnvFile(string $path): void
         return;
     }
 
+    if (isset($lines[0])) {
+        $lines[0] = preg_replace('/^\xEF\xBB\xBF/', '', $lines[0]) ?? $lines[0];
+    }
+
     foreach ($lines as $line) {
         $line = trim($line);
         if ($line === '' || str_starts_with($line, '#')) {
@@ -38,10 +42,14 @@ function loadEnvFile(string $path): void
         ) {
             $value = substr($value, 1, -1);
         }
+        $value = trim($value, " \t\r\n\0\x0B");
 
-        if ($key !== '' && getenv($key) === false) {
-            putenv("{$key}={$value}");
+        if ($key !== '' && !array_key_exists($key, $_ENV)) {
             $_ENV[$key] = $value;
+            // putenv peut être désactivé sur certains hébergeurs Ionos
+            if (function_exists('putenv')) {
+                @putenv("{$key}={$value}");
+            }
         }
     }
 
@@ -50,17 +58,23 @@ function loadEnvFile(string $path): void
 
 function env(string $key, ?string $default = null): ?string
 {
-    $value = getenv($key);
-    if ($value === false) {
-        return $default;
+    if (array_key_exists($key, $_ENV) && $_ENV[$key] !== '') {
+        return (string) $_ENV[$key];
     }
-    return $value;
+    $value = getenv($key);
+    if ($value !== false && $value !== '') {
+        return (string) $value;
+    }
+    return $default;
 }
 
 $envDir = dirname(__DIR__);
+
+// 1. Secrets (.env) en premier — DB_PASSWORD prioritaire
 loadEnvFile(__DIR__ . '/.env');
 loadEnvFile($envDir . '/../.env');
 
+// 2. Hôte / base / user (config.local.php ne doit PAS définir DB_PASS)
 if (is_readable(__DIR__ . '/config.local.php')) {
     require __DIR__ . '/config.local.php';
 }

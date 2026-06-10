@@ -34,7 +34,18 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
     if (open) {
       const defaults: Record<string, unknown> = {};
       fields.forEach(f => {
-        defaults[f.key] = initialData?.[f.key] ?? (f.type === 'switch' ? false : f.type === 'select' && f.options?.length ? f.options[0].value : '');
+        if (f.type === 'switch') {
+          defaults[f.key] = initialData?.[f.key] ?? false;
+        } else if (f.type === 'select' && f.options?.length) {
+          const valid = f.options.filter(o => o.value !== '');
+          const init = initialData?.[f.key];
+          const initStr = init != null && init !== '' ? String(init) : '';
+          defaults[f.key] = valid.some(o => o.value === initStr)
+            ? initStr
+            : valid[0]?.value ?? '';
+        } else {
+          defaults[f.key] = initialData?.[f.key] ?? '';
+        }
       });
       setForm(defaults);
     }
@@ -78,13 +89,16 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
                 />
               )}
 
-              {f.type === 'select' && f.options && (
-                <Select value={String(form[f.key] ?? '')} onValueChange={v => set(f.key, v)}>
+              {f.type === 'select' && f.options && f.options.filter(o => o.value !== '').length > 0 && (
+                <Select
+                  value={form[f.key] != null && String(form[f.key]) !== '' ? String(form[f.key]) : undefined}
+                  onValueChange={v => set(f.key, v)}
+                >
                   <SelectTrigger className="bg-secondary border-border text-foreground h-9">
                     <SelectValue placeholder={f.placeholder ?? 'Sélectionner…'} />
                   </SelectTrigger>
                   <SelectContent className="bg-card border-border text-foreground">
-                    {f.options.map(o => (
+                    {f.options.filter(o => o.value !== '').map(o => (
                       <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                     ))}
                   </SelectContent>

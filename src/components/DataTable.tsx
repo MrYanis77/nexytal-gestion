@@ -175,9 +175,17 @@ export function DataTable<T extends { id: string }>({
 export function StatusBadge({ statut }: { statut: string }) {
   const map: Record<string, { label: string; class: string }> = {
     publie: { label: 'Publié', class: 'bg-green-500/15 text-green-400' },
+    published: { label: 'Publié', class: 'bg-green-500/15 text-green-400' },
     brouillon: { label: 'Brouillon', class: 'bg-yellow-500/15 text-yellow-400' },
+    draft: { label: 'Brouillon', class: 'bg-yellow-500/15 text-yellow-400' },
     actif: { label: 'Actif', class: 'bg-green-500/15 text-green-400' },
+    active: { label: 'Actif', class: 'bg-green-500/15 text-green-400' },
     inactif: { label: 'Inactif', class: 'bg-red-500/15 text-red-400' },
+    inactive: { label: 'Inactif', class: 'bg-red-500/15 text-red-400' },
+    pending: { label: 'En attente', class: 'bg-yellow-500/15 text-yellow-400' },
+    confirmed: { label: 'Confirmée', class: 'bg-blue-500/15 text-blue-400' },
+    completed: { label: 'Terminée', class: 'bg-green-500/15 text-green-400' },
+    cancelled: { label: 'Annulée', class: 'bg-red-500/15 text-red-400' },
     disponible: { label: 'Disponible', class: 'bg-green-500/15 text-green-400' },
     reserve: { label: 'Réservé', class: 'bg-blue-500/15 text-blue-400' },
     annule: { label: 'Annulé', class: 'bg-red-500/15 text-red-400' },

@@ -20,8 +20,23 @@ if (!defined('DB_NAME')) {
 if (!defined('DB_USER')) {
     define('DB_USER', env('DB_USER', env('DB_USERNAME', 'dbu977482')));
 }
+// Mot de passe : uniquement .env (jamais dans config.local.php)
 if (!defined('DB_PASS')) {
-    define('DB_PASS', env('DB_PASSWORD', env('DB_PASS', 'Nexytal@!77')));
+    $dbPass = env('DB_PASSWORD', env('DB_PASS', 'Nexytal@!77'));
+    define('DB_PASS', trim((string) $dbPass));
+}
+
+/**
+ * Mot de passe effectif : DB_PASSWORD du .env prioritaire sur un ancien DB_PASS dans config.local.php
+ */
+function resolveDbPassword(): string
+{
+    $fromEnv = env('DB_PASSWORD', env('DB_PASS', null));
+    if ($fromEnv !== null && $fromEnv !== '') {
+        return trim((string) $fromEnv);
+    }
+
+    return defined('DB_PASS') ? trim((string) DB_PASS) : 'Nexytal@!77';
 }
 if (!defined('DB_CHARSET')) {
     define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
@@ -67,6 +82,11 @@ if (!defined('ALLOWED_ORIGINS')) {
 // ===== ENVIRONNEMENT =====
 if (!defined('APP_ENV')) {
     define('APP_ENV', env('APP_ENV', 'production'));
+}
+
+// ===== TESTS INSERT (/api/health/insert) =====
+if (!defined('INSERT_TEST_KEY')) {
+    define('INSERT_TEST_KEY', env('INSERT_TEST_KEY', 'nexytal-insert-test'));
 }
 
 // ===== RATE LIMITING =====

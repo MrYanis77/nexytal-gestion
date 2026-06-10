@@ -239,15 +239,21 @@ class Validator
      */
     public static function slugify(string $text): string
     {
-        // Translittération des accents
-        $text = transliterator_transliterate('Any-Latin; Latin-ASCII; Lower()', $text);
-        // Remplacer les caractères non-alphanumériques par des tirets
+        $text = trim($text);
+        if (function_exists('transliterator_transliterate')) {
+            $converted = transliterator_transliterate('Any-Latin; Latin-ASCII; Lower()', $text);
+            if ($converted !== false) {
+                $text = $converted;
+            }
+        } else {
+            $text = strtolower($text);
+            $text = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text) ?: $text;
+        }
+        $text = strtolower($text);
         $text = preg_replace('/[^a-z0-9]+/', '-', $text);
-        // Supprimer les tirets en début/fin
         $text = trim($text, '-');
-        // Supprimer les tirets multiples
         $text = preg_replace('/-+/', '-', $text);
-        return $text;
+        return $text !== '' ? $text : 'item-' . time();
     }
 
     /**

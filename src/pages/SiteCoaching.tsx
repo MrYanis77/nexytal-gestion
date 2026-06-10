@@ -1,116 +1,208 @@
-import { useState } from 'react';
-import { useApp, Coach, Creneau, BlogArticle } from '@/contexts/AppContext';
+import { useMemo, useState } from 'react';
+import { Coach, Creneau, BlogArticle } from '@/contexts/AppContext';
 import { useFetch } from '@/hooks/useFetch';
 import { api } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import {
+  blogPostFromApi,
+  blogPostToApi,
+  bookingFromApi,
+  bookingToApi,
+  buildBlogArticleFields,
+  buildBookingEditFields,
+  buildCoachFields,
+  coachFromApi,
+  coachToApi,
+  buildBlogCategoryFields,
+  buildCityFields,
+  buildSpecialtyFields,
+  buildCertificationFields
+} from '@/lib/mappers';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
-import { FormModal, ConfirmDelete, FieldDef } from '@/components/FormModal';
+import { FormModal, ConfirmDelete } from '@/components/FormModal';
 import { Heart, Eye } from 'lucide-react';
 import { toast } from 'sonner';
-import { nanoid } from 'nanoid';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
 
 const COLOR = '#DC2626';
 
-const COACH_FIELDS: FieldDef[] = [
-  { key: 'nom', label: 'Nom complet', type: 'text', required: true },
-  { key: 'titre', label: 'Titre / Certification', type: 'text' },
-  { key: 'localisation', label: 'Ville', type: 'text' },
-  { key: 'bio', label: 'Biographie', type: 'textarea', span: true },
-  { key: 'visible', label: 'Visible sur le site', type: 'switch' },
-  { key: 'ordre', label: 'Ordre d\'affichage', type: 'number' },
-];
-
-const CRENEAU_FIELDS: FieldDef[] = [
-  { key: 'date', label: 'Date', type: 'date', required: true },
-  { key: 'heure', label: 'Heure', type: 'text', placeholder: 'ex. 09:00' },
-  { key: 'capacite', label: 'Capacité (places)', type: 'number' },
-  { key: 'statut', label: 'Statut', type: 'select', options: [
-    { value: 'disponible', label: 'Disponible' }, { value: 'reserve', label: 'Réservé' }, { value: 'annule', label: 'Annulé' },
-  ]},
-];
-
-const ARTICLE_FIELDS: FieldDef[] = [
-  { key: 'titre', label: 'Titre', type: 'text', required: true, span: true },
-  { key: 'extrait', label: 'Extrait', type: 'textarea', span: true },
-  { key: 'categorie', label: 'Catégorie', type: 'select', options: [
-    { value: 'Leadership', label: 'Leadership' }, { value: 'Coaching', label: 'Coaching' },
-    { value: 'Management', label: 'Management' }, { value: 'Méthode', label: 'Méthode' },
-    { value: 'Équipe', label: 'Équipe' }, { value: 'Bien-être', label: 'Bien-être' },
-  ]},
-  { key: 'auteur', label: 'Auteur', type: 'text' },
-  { key: 'date', label: 'Date', type: 'date' },
-  { key: 'statut', label: 'Statut', type: 'select', options: [{ value: 'publie', label: 'Publié' }, { value: 'brouillon', label: 'Brouillon' }] },
-];
-
 export default function SiteCoaching() {
-  const { data, setData } = useApp();
   const [tab, setTab] = useState('coachs');
   const [modal, setModal] = useState<{ type: string; item?: unknown } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; label: string } | null>(null);
-  const [viewCreneau, setViewCreneau] = useState<Creneau | null>(null);
+  const [viewBooking, setViewBooking] = useState<Creneau | null>(null);
 
-  const { data: coachsData, refetch: refetchC } = useFetch<{ data: Coach[] }>('/coaching/coaches');
-  const { data: creneauxData, refetch: refetchCr } = useFetch<{ data: Creneau[] }>('/coaching/bookings');
-  const { data: articlesData, refetch: refetchA } = useFetch<{ data: BlogArticle[] }>('/blog/posts?site=coaching');
+  const { data: coachsData, refetch: refetchC } = useFetch<{ data: Record<string, unknown>[] }>('/coaching/coaches?site=coaching');
+  const { data: bookingsData, refetch: refetchCr } = useFetch<{ data: Record<string, unknown>[] }>('/coaching/bookings?site=coaching');
+  const { data: articlesData, refetch: refetchA } = useFetch<{ data: Record<string, unknown>[] }>('/blog/posts?site=coaching');
+  const { data: blogCategoriesData, refetch: refetchBc } = useFetch<{ data: any[] }>('/blog/categories?site=coaching');
+  const { data: citiesData, refetch: refetchCities } = useFetch<{ data: any[] }>('/coaching/cities');
+  const { data: specialtiesData, refetch: refetchSpec } = useFetch<{ data: any[] }>('/coaching/specialties');
+  const { data: certificationsData, refetch: refetchCert } = useFetch<{ data: any[] }>('/coaching/certifications');
 
-  const coachs = coachsData?.data || [];
-  const creneaux = creneauxData?.data || [];
-  const articles = articlesData?.data || [];
+  const blogCategoryOptions = useMemo(
+    () => (blogCategoriesData?.data ?? []).map(c => ({ value: String(c.id), label: c.name })),
+    [blogCategoriesData],
+  );
 
-  const getCoachName = (id?: string) => coachs.find(c => c.id === id)?.nom ?? '—';
+  const cityOptions = useMemo(
+    () => (citiesData?.data ?? []).map(c => ({ value: String(c.id), label: c.name })),
+    [citiesData],
+  );
+
+  const coachs = useMemo(() => (coachsData?.data ?? []).map(coachFromApi), [coachsData]);
+  const reservations = useMemo(() => (bookingsData?.data ?? []).map(bookingFromApi), [bookingsData]);
+  const articles = useMemo(() => (articlesData?.data ?? []).map(blogPostFromApi), [articlesData]);
+
+  const coachFields = useMemo(() => buildCoachFields(cityOptions), [cityOptions]);
+  const bookingFields = useMemo(() => buildBookingEditFields(), []);
+  const articleFields = useMemo(() => buildBlogArticleFields(blogCategoryOptions), [blogCategoryOptions]);
+  const blogCategoryFields = useMemo(() => buildBlogCategoryFields(), []);
+  const cityFields = useMemo(() => buildCityFields(), []);
+  const specialtyFields = useMemo(() => buildSpecialtyFields(), []);
+  const certificationFields = useMemo(() => buildCertificationFields(), []);
 
   const saveCoach = async (raw: Record<string, unknown>) => {
     const item = modal?.item as Coach | undefined;
     try {
+      const payload = coachToApi(raw);
       if (item) {
-        await api.put(`/coaching/coaches/${item.id}`, raw);
+        await api.put(`/coaching/coaches/${item.id}`, payload);
         toast.success('Coach mis à jour.');
       } else {
-        await api.post('/coaching/coaches', raw);
+        await api.post('/coaching/coaches', { ...payload, site: 'coaching' });
         toast.success('Coach créé.');
       }
       refetchC();
-    } catch { toast.error('Erreur lors de la sauvegarde.'); }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
   };
 
-  const saveCreneau = async (raw: Record<string, unknown>) => {
+  const saveBooking = async (raw: Record<string, unknown>) => {
     const item = modal?.item as Creneau | undefined;
+    if (!item) return;
     try {
-      if (item) {
-        await api.put(`/coaching/bookings/${item.id}`, raw);
-        toast.success('Créneau mis à jour.');
-      } else {
-        await api.post('/coaching/bookings', raw);
-        toast.success('Créneau créé.');
-      }
+      const payload = bookingToApi(raw);
+      await api.put(`/coaching/bookings/${item.id}`, payload);
+      toast.success('Réservation mise à jour.');
       refetchCr();
-    } catch { toast.error('Erreur lors de la sauvegarde.'); }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
   };
 
   const saveArticle = async (raw: Record<string, unknown>) => {
     const item = modal?.item as BlogArticle | undefined;
     try {
+      const payload = blogPostToApi(raw);
       if (item) {
-        await api.put(`/blog/posts/${item.id}`, raw);
+        await api.put(`/blog/posts/${item.id}`, payload);
         toast.success('Article mis à jour.');
       } else {
-        await api.post('/blog/posts', { ...raw, site: 'coaching' });
+        await api.post('/blog/posts', { ...payload, site: 'coaching' });
         toast.success('Article créé.');
       }
       refetchA();
-    } catch { toast.error('Erreur lors de la sauvegarde.'); }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
+  };
+
+  const saveBlogCategory = async (raw: Record<string, unknown>) => {
+    const item = modal?.item as any;
+    try {
+      if (item) {
+        await api.put(`/blog/categories/${item.id}`, raw);
+        toast.success('Catégorie mise à jour.');
+      } else {
+        await api.post('/blog/categories', { ...raw, site: 'coaching' });
+        toast.success('Catégorie créée.');
+      }
+      refetchBc();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
+  };
+
+  const saveCity = async (raw: Record<string, unknown>) => {
+    const item = modal?.item as any;
+    try {
+      if (item) {
+        await api.put(`/coaching/cities/${item.id}`, raw);
+        toast.success('Ville mise à jour.');
+      } else {
+        await api.post('/coaching/cities', raw);
+        toast.success('Ville créée.');
+      }
+      refetchCities();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
+  };
+
+  const saveSpecialty = async (raw: Record<string, unknown>) => {
+    const item = modal?.item as any;
+    try {
+      if (item) {
+        await api.put(`/coaching/specialties/${item.id}`, raw);
+        toast.success('Spécialité mise à jour.');
+      } else {
+        await api.post('/coaching/specialties', raw);
+        toast.success('Spécialité créée.');
+      }
+      refetchSpec();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
+  };
+
+  const saveCertification = async (raw: Record<string, unknown>) => {
+    const item = modal?.item as any;
+    try {
+      if (item) {
+        await api.put(`/coaching/certifications/${item.id}`, raw);
+        toast.success('Certification mise à jour.');
+      } else {
+        await api.post('/coaching/certifications', raw);
+        toast.success('Certification créée.');
+      }
+      refetchCert();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      if (deleteTarget.type === 'coach') { await api.delete(`/coaching/coaches/${deleteTarget.id}`); refetchC(); }
-      if (deleteTarget.type === 'creneau') { await api.delete(`/coaching/bookings/${deleteTarget.id}`); refetchCr(); }
-      if (deleteTarget.type === 'article') { await api.delete(`/blog/posts/${deleteTarget.id}`); refetchA(); }
+      if (deleteTarget.type === 'coach') {
+        await api.delete(`/coaching/coaches/${deleteTarget.id}`);
+        refetchC();
+      } else if (deleteTarget.type === 'booking') {
+        await api.delete(`/coaching/bookings/${deleteTarget.id}`);
+        refetchCr();
+      } else if (deleteTarget.type === 'article') {
+        await api.delete(`/blog/posts/${deleteTarget.id}`);
+        refetchA();
+      } else if (deleteTarget.type === 'blog_category') {
+        await api.delete(`/blog/categories/${deleteTarget.id}`);
+        refetchBc();
+      } else if (deleteTarget.type === 'city') {
+        await api.delete(`/coaching/cities/${deleteTarget.id}`);
+        refetchCities();
+      } else if (deleteTarget.type === 'specialty') {
+        await api.delete(`/coaching/specialties/${deleteTarget.id}`);
+        refetchSpec();
+      } else if (deleteTarget.type === 'certification') {
+        await api.delete(`/coaching/certifications/${deleteTarget.id}`);
+        refetchCert();
+      }
       toast.success('Élément supprimé.');
-    } catch { toast.error('Erreur lors de la suppression.'); }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la suppression.'));
+    }
     setDeleteTarget(null);
   };
 
@@ -119,12 +211,16 @@ export default function SiteCoaching() {
       <SiteHeader
         icon={<Heart className="w-5 h-5" />}
         title="Nexytal Coaching"
-        description="Gestion des coachs, créneaux de diagnostic et articles"
+        description="Coachs, réservations clients et articles"
         color={COLOR}
         tabs={[
           { key: 'coachs', label: 'Coachs', count: coachs.length },
-          { key: 'creneaux', label: 'Créneaux', count: creneaux.length },
+          { key: 'reservations', label: 'Réservations', count: reservations.length },
           { key: 'articles', label: 'Blog', count: articles.length },
+          { key: 'blog_categories', label: 'Catégories Blog', count: blogCategoriesData?.data?.length ?? 0 },
+          { key: 'cities', label: 'Villes', count: citiesData?.data?.length ?? 0 },
+          { key: 'specialties', label: 'Spécialités', count: specialtiesData?.data?.length ?? 0 },
+          { key: 'certifications', label: 'Certifications', count: certificationsData?.data?.length ?? 0 },
         ]}
         activeTab={tab}
         onTabChange={setTab}
@@ -147,32 +243,35 @@ export default function SiteCoaching() {
                   <p className="text-xs text-muted-foreground">{c.titre}</p>
                 </div>
               )},
+              { key: 'email', label: 'Email', hidden: 'md' },
               { key: 'localisation', label: 'Ville', hidden: 'sm' },
-              { key: 'visible', label: 'Visible', render: c => (
+              { key: 'visible', label: 'Disponible', render: c => (
                 <span className={`text-xs px-2 py-0.5 rounded-full ${c.visible ? 'bg-green-500/15 text-green-400' : 'bg-secondary text-muted-foreground'}`}>
                   {c.visible ? 'Oui' : 'Non'}
                 </span>
               ), hidden: 'md' },
-              { key: 'ordre', label: 'Ordre', hidden: 'lg' },
             ]}
           />
         )}
 
-        {tab === 'creneaux' && (
+        {tab === 'reservations' && (
           <DataTable<Creneau>
-            data={creneaux}
+            data={reservations}
             accentColor={COLOR}
-            addLabel="Nouveau créneau"
-            onAdd={() => setModal({ type: 'creneau' })}
-            onEdit={item => setModal({ type: 'creneau', item })}
-            onDelete={item => setDeleteTarget({ type: 'creneau', id: item.id, label: `${item.date} ${item.heure}` })}
-            onView={item => setViewCreneau(item)}
-            searchKeys={['date', 'heure']}
+            onEdit={item => setModal({ type: 'booking', item })}
+            onDelete={item => setDeleteTarget({ type: 'booking', id: item.id, label: `${item.client_nom} — ${item.date}` })}
+            onView={item => setViewBooking(item)}
+            searchKeys={['client_nom', 'client_email', 'coach_nom']}
+            emptyMessage="Aucune réservation. Les clients réservent via le site public."
             columns={[
-              { key: 'date', label: 'Date', render: c => <span className="font-mono text-sm text-foreground">{c.date}</span> },
-              { key: 'heure', label: 'Heure', render: c => <span className="font-mono text-sm text-foreground">{c.heure}</span> },
-              { key: 'coach', label: 'Coach', render: c => <span className="text-muted-foreground text-sm">{getCoachName(c.coach)}</span>, hidden: 'sm' },
-              { key: 'capacite', label: 'Places', hidden: 'md' },
+              { key: 'date', label: 'Date', render: c => <span className="font-mono text-sm">{c.date} {c.heure}</span> },
+              { key: 'client_nom', label: 'Client', render: c => (
+                <div>
+                  <p className="font-medium text-foreground">{c.client_nom}</p>
+                  <p className="text-xs text-muted-foreground">{c.client_email}</p>
+                </div>
+              )},
+              { key: 'coach_nom', label: 'Coach', hidden: 'sm' },
               { key: 'statut', label: 'Statut', render: c => <StatusBadge statut={c.statut} /> },
             ]}
           />
@@ -196,44 +295,103 @@ export default function SiteCoaching() {
             ]}
           />
         )}
+
+        {tab === 'blog_categories' && (
+          <DataTable<any>
+            data={blogCategoriesData?.data ?? []}
+            accentColor={COLOR}
+            addLabel="Nouvelle catégorie"
+            onAdd={() => setModal({ type: 'blog_category' })}
+            onEdit={item => setModal({ type: 'blog_category', item })}
+            onDelete={item => setDeleteTarget({ type: 'blog_category', id: item.id, label: item.name })}
+            searchKeys={['name', 'slug']}
+            columns={[
+              { key: 'name', label: 'Nom', render: c => <span className="font-medium text-foreground">{c.name}</span> },
+              { key: 'slug', label: 'Slug' },
+              { key: 'color', label: 'Couleur', render: c => (
+                c.color ? <div className="flex items-center gap-2"><div className="w-4 h-4 rounded-full" style={{ background: c.color }} />{c.color}</div> : '-'
+              ) },
+              { key: 'is_active', label: 'Statut', render: c => <StatusBadge statut={c.is_active ? 'active' : 'inactive'} /> },
+            ]}
+          />
+        )}
+        {tab === 'cities' && (
+          <DataTable<any>
+            data={citiesData?.data ?? []}
+            accentColor={COLOR}
+            addLabel="Nouvelle ville"
+            onAdd={() => setModal({ type: 'city' })}
+            onEdit={item => setModal({ type: 'city', item })}
+            onDelete={item => setDeleteTarget({ type: 'city', id: item.id, label: item.name })}
+            searchKeys={['name', 'slug']}
+            columns={[
+              { key: 'name', label: 'Nom', render: c => <span className="font-medium text-foreground">{c.name}</span> },
+              { key: 'slug', label: 'Slug' },
+            ]}
+          />
+        )}
+        {tab === 'specialties' && (
+          <DataTable<any>
+            data={specialtiesData?.data ?? []}
+            accentColor={COLOR}
+            addLabel="Nouvelle spécialité"
+            onAdd={() => setModal({ type: 'specialty' })}
+            onEdit={item => setModal({ type: 'specialty', item })}
+            onDelete={item => setDeleteTarget({ type: 'specialty', id: item.id, label: item.name })}
+            searchKeys={['name', 'slug']}
+            columns={[
+              { key: 'name', label: 'Nom', render: c => <span className="font-medium text-foreground">{c.name}</span> },
+              { key: 'slug', label: 'Slug' },
+              { key: 'icon', label: 'Icône' },
+            ]}
+          />
+        )}
+        {tab === 'certifications' && (
+          <DataTable<any>
+            data={certificationsData?.data ?? []}
+            accentColor={COLOR}
+            addLabel="Nouvelle certification"
+            onAdd={() => setModal({ type: 'certification' })}
+            onEdit={item => setModal({ type: 'certification', item })}
+            onDelete={item => setDeleteTarget({ type: 'certification', id: item.id, label: item.code })}
+            searchKeys={['code', 'organization']}
+            columns={[
+              { key: 'code', label: 'Code', render: c => <span className="font-medium text-foreground">{c.code}</span> },
+              { key: 'organization', label: 'Organisme' },
+              { key: 'level', label: 'Niveau' },
+            ]}
+          />
+        )}
       </div>
 
-      {/* Modals */}
       <FormModal open={modal?.type === 'coach'} onClose={() => setModal(null)} onSave={saveCoach}
         title={modal?.item ? 'Modifier le coach' : 'Nouveau coach'}
-        fields={COACH_FIELDS} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
-      <FormModal open={modal?.type === 'creneau'} onClose={() => setModal(null)} onSave={saveCreneau}
-        title={modal?.item ? 'Modifier le créneau' : 'Nouveau créneau'}
-        fields={CRENEAU_FIELDS} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
+        fields={coachFields} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
+      <FormModal open={modal?.type === 'booking'} onClose={() => setModal(null)} onSave={saveBooking}
+        title="Modifier la réservation"
+        fields={bookingFields} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
       <FormModal open={modal?.type === 'article'} onClose={() => setModal(null)} onSave={saveArticle}
         title={modal?.item ? 'Modifier l\'article' : 'Nouvel article'}
-        fields={ARTICLE_FIELDS} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
+        fields={articleFields} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
+      <FormModal open={modal?.type === 'blog_category'} onClose={() => setModal(null)} onSave={saveBlogCategory} title={modal?.item ? 'Modifier' : 'Nouvelle catégorie'} fields={blogCategoryFields} initialData={modal?.item as any} accentColor={COLOR} />
+      <FormModal open={modal?.type === 'city'} onClose={() => setModal(null)} onSave={saveCity} title={modal?.item ? 'Modifier' : 'Nouvelle ville'} fields={cityFields} initialData={modal?.item as any} accentColor={COLOR} />
+      <FormModal open={modal?.type === 'specialty'} onClose={() => setModal(null)} onSave={saveSpecialty} title={modal?.item ? 'Modifier' : 'Nouvelle spécialité'} fields={specialtyFields} initialData={modal?.item as any} accentColor={COLOR} />
+      <FormModal open={modal?.type === 'certification'} onClose={() => setModal(null)} onSave={saveCertification} title={modal?.item ? 'Modifier' : 'Nouvelle certification'} fields={certificationFields} initialData={modal?.item as any} accentColor={COLOR} />
       <ConfirmDelete open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} label={deleteTarget?.label} />
 
-      {/* View reservation */}
-      <Dialog open={!!viewCreneau} onOpenChange={v => !v && setViewCreneau(null)}>
+      <Dialog open={!!viewBooking} onOpenChange={v => !v && setViewBooking(null)}>
         <DialogContent className="max-w-sm bg-card border-border text-foreground">
           <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Space Grotesk' }}>Détail du créneau</DialogTitle>
+            <DialogTitle style={{ fontFamily: 'Space Grotesk' }}>Détail réservation</DialogTitle>
           </DialogHeader>
-          {viewCreneau && (
+          {viewBooking && (
             <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-2 gap-2">
-                <div><p className="text-xs text-muted-foreground">Date</p><p className="font-mono">{viewCreneau.date}</p></div>
-                <div><p className="text-xs text-muted-foreground">Heure</p><p className="font-mono">{viewCreneau.heure}</p></div>
-                <div><p className="text-xs text-muted-foreground">Coach</p><p>{getCoachName(viewCreneau.coach)}</p></div>
-                <div><p className="text-xs text-muted-foreground">Statut</p><StatusBadge statut={viewCreneau.statut} /></div>
-              </div>
-              {viewCreneau.reservation && (
-                <div className="border border-border rounded-lg p-3 space-y-2 bg-secondary/50">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Réservation</p>
-                  <p><span className="text-muted-foreground">Nom :</span> {viewCreneau.reservation.prenom} {viewCreneau.reservation.nom}</p>
-                  <p><span className="text-muted-foreground">Email :</span> {viewCreneau.reservation.email}</p>
-                  <p><span className="text-muted-foreground">Tél :</span> {viewCreneau.reservation.telephone}</p>
-                  <p><span className="text-muted-foreground">Profil :</span> {viewCreneau.reservation.profil}</p>
-                </div>
-              )}
-              {!viewCreneau.reservation && <p className="text-muted-foreground text-xs italic">Aucune réservation pour ce créneau.</p>}
+              <p><span className="text-muted-foreground">Date :</span> {viewBooking.date} {viewBooking.heure}</p>
+              <p><span className="text-muted-foreground">Coach :</span> {viewBooking.coach_nom}</p>
+              <p><span className="text-muted-foreground">Client :</span> {viewBooking.client_nom}</p>
+              <p><span className="text-muted-foreground">Email :</span> {viewBooking.client_email}</p>
+              <p><span className="text-muted-foreground">Statut :</span> <StatusBadge statut={viewBooking.statut} /></p>
+              {viewBooking.notes && <p><span className="text-muted-foreground">Notes :</span> {viewBooking.notes}</p>}
             </div>
           )}
         </DialogContent>

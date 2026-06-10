@@ -1,62 +1,83 @@
-import { useState } from 'react';
-import { useApp, BlogArticle } from '@/contexts/AppContext';
+import { useMemo, useState } from 'react';
+import { BlogArticle } from '@/contexts/AppContext';
 import { useFetch } from '@/hooks/useFetch';
 import { api } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import { blogPostFromApi, blogPostToApi, buildBlogArticleFields, buildBlogCategoryFields } from '@/lib/mappers';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
-import { FormModal, ConfirmDelete, FieldDef } from '@/components/FormModal';
+import { FormModal, ConfirmDelete } from '@/components/FormModal';
 import { TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
-import { nanoid } from 'nanoid';
 
 const COLOR = '#D97706';
 
-const ARTICLE_FIELDS: FieldDef[] = [
-  { key: 'titre', label: 'Titre', type: 'text', required: true, span: true },
-  { key: 'extrait', label: 'Extrait', type: 'textarea', span: true },
-  { key: 'categorie', label: 'Catégorie', type: 'select', options: [
-    { value: 'Reconversion', label: 'Reconversion' }, { value: 'Carrière', label: 'Carrière' },
-    { value: 'Emploi', label: 'Emploi' }, { value: 'Conseils', label: 'Conseils' },
-    { value: 'Formation', label: 'Formation' }, { value: 'Actualités', label: 'Actualités' },
-  ]},
-  { key: 'auteur', label: 'Auteur', type: 'text' },
-  { key: 'date', label: 'Date', type: 'date' },
-  { key: 'statut', label: 'Statut', type: 'select', options: [
-    { value: 'publie', label: 'Publié' }, { value: 'brouillon', label: 'Brouillon' },
-  ]},
-];
-
 export default function SiteCarriere() {
-  const { data, setData } = useApp();
   const [modal, setModal] = useState<{ item?: BlogArticle } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
 
-  const { data: articlesData, refetch } = useFetch<{ data: BlogArticle[] }>('/blog/posts?site=carriere');
-  const articles = articlesData?.data || [];
+  const { data: articlesData, refetch } = useFetch<{ data: Record<string, unknown>[] }>('/blog/posts?site_id=4');
+  const { data: blogCategoriesData, refetch: refetchBc } = useFetch<{ data: any[] }>('/blog/categories?site_id=4');
+
+  const blogCategoryOptions = useMemo(
+    () => (blogCategoriesData?.data ?? []).map(c => ({ value: String(c.id), label: c.name })),
+    [blogCategoriesData],
+  );
+
+  const articles = useMemo(() => (articlesData?.data ?? []).map(blogPostFromApi), [articlesData]);
+  const articleFields = useMemo(() => buildBlogArticleFields(blogCategoryOptions), [blogCategoryOptions]);
+  const blogCategoryFields = useMemo(() => buildBlogCategoryFields(), []);
 
   const publie = articles.filter(a => a.statut === 'publie').length;
   const brouillon = articles.filter(a => a.statut === 'brouillon').length;
 
   const saveArticle = async (raw: Record<string, unknown>) => {
     try {
+      const payload = blogPostToApi(raw);
       if (modal?.item) {
-        await api.put(`/blog/posts/${modal.item.id}`, raw);
+        await api.put(`/blog/posts/${modal.item.id}?site_id=4`, payload);
         toast.success('Article mis à jour.');
       } else {
-        await api.post('/blog/posts', { ...raw, site: 'carriere' });
+        await api.post('/blog/posts?site_id=4', payload);
         toast.success('Article créé.');
       }
       refetch();
-    } catch { toast.error('Erreur lors de la sauvegarde.'); }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
+  };
+
+  const saveBlogCategory = async (raw: Record<string, unknown>) => {
+    const item = modal?.item as any;
+    try {
+      if (item) {
+        await api.put(`/blog/categories/${item.id}?site_id=4`, raw);
+        toast.success('Catégorie mise à jour.');
+      } else {
+        await api.post('/blog/categories?site_id=4', raw);
+        toast.success('Catégorie créée.');
+      }
+      refetchBc();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      await api.delete(`/blog/posts/${deleteTarget.id}`);
-      toast.success('Article supprimé.');
-      refetch();
-    } catch { toast.error('Erreur lors de la suppression.'); }
+      if ((deleteTarget as any).type === 'blog_category') {
+        await api.delete(`/blog/categories/${deleteTarget.id}?site_id=4`);
+        toast.success('Catégorie supprimée.');
+        refetchBc();
+      } else {
+        await api.delete(`/blog/posts/${deleteTarget.id}?site_id=4`);
+        toast.success('Article supprimé.');
+        refetch();
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la suppression.'));
+    }
     setDeleteTarget(null);
   };
 
@@ -69,13 +90,13 @@ export default function SiteCarriere() {
         color={COLOR}
         tabs={[
           { key: 'articles', label: 'Articles blog', count: articles.length },
+          { key: 'blog_categories', label: 'Catégories', count: blogCategoriesData?.data?.length ?? 0 }
         ]}
-        activeTab="articles"
-        onTabChange={() => {}}
+        activeTab={modal && typeof (modal as any).type === 'string' ? (modal as any).type === 'blog_category' ? 'blog_categories' : 'articles' : 'articles'}
+        onTabChange={(k) => setModal(null)}
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           {[
             { label: 'Total', value: articles.length, color: COLOR },
@@ -107,11 +128,34 @@ export default function SiteCarriere() {
             { key: 'statut', label: 'Statut', render: a => <StatusBadge statut={a.statut} /> },
           ]}
         />
+
+        <div className="mt-8">
+          <DataTable<any>
+            data={blogCategoriesData?.data ?? []}
+            accentColor={COLOR}
+            addLabel="Nouvelle catégorie"
+            onAdd={() => setModal({ type: 'blog_category' } as any)}
+            onEdit={item => setModal({ type: 'blog_category', item } as any)}
+            onDelete={item => setDeleteTarget({ id: item.id, label: item.name, type: 'blog_category' } as any)}
+            searchKeys={['name', 'slug']}
+            columns={[
+              { key: 'name', label: 'Nom', render: c => <span className="font-medium text-foreground">{c.name}</span> },
+              { key: 'slug', label: 'Slug' },
+              { key: 'color', label: 'Couleur', render: c => (
+                c.color ? <div className="flex items-center gap-2"><div className="w-4 h-4 rounded-full" style={{ background: c.color }} />{c.color}</div> : '-'
+              ) },
+              { key: 'is_active', label: 'Statut', render: c => <StatusBadge statut={c.is_active ? 'active' : 'inactive'} /> },
+            ]}
+          />
+        </div>
       </div>
 
-      <FormModal open={modal !== null} onClose={() => setModal(null)} onSave={saveArticle}
+      <FormModal open={modal !== null && (modal as any).type !== 'blog_category'} onClose={() => setModal(null)} onSave={saveArticle}
         title={modal?.item ? 'Modifier l\'article' : 'Nouvel article'}
-        fields={ARTICLE_FIELDS} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
+        fields={articleFields} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
+      <FormModal open={modal !== null && (modal as any).type === 'blog_category'} onClose={() => setModal(null)} onSave={saveBlogCategory}
+        title={modal?.item ? 'Modifier la catégorie' : 'Nouvelle catégorie'}
+        fields={blogCategoryFields} initialData={modal?.item as any} accentColor={COLOR} />
       <ConfirmDelete open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} label={deleteTarget?.label} />
     </div>
   );

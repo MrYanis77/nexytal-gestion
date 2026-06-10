@@ -51,39 +51,44 @@ function registerSeoRoutes(Router $router): void
         $stmt->execute();
         $existing = $stmt->fetch();
 
+        $schemaJson = $data['schema_json'] ?? $data['schema_markup'] ?? null;
+        if (is_array($schemaJson)) {
+            $schemaJson = json_encode($schemaJson, JSON_UNESCAPED_UNICODE);
+        }
+
         if ($existing) {
             $stmtU = $db->prepare(
-                'UPDATE seo_metadata 
-                 SET meta_title = :tit, meta_description = :desc, canonical_url = :can, og_title = :ogtit, og_description = :ogdesc, og_image = :ogimg, schema_markup = :schema, updated_at = NOW() 
+                'UPDATE seo_metadata
+                 SET meta_title = :tit, meta_description = :desc, canonical_url = :can, og_title = :ogtit, og_description = :ogdesc, og_image = :ogimg, schema_json = :schema, updated_at = NOW()
                  WHERE id = :id'
             );
-            $stmtU->bindParam(':tit', $data['meta_title'], PDO::PARAM_STR);
-            $stmtU->bindParam(':desc', $data['meta_description'], PDO::PARAM_STR);
-            $stmtU->bindParam(':can', $data['canonical_url'], PDO::PARAM_STR);
-            $stmtU->bindParam(':ogtit', $data['og_title'], PDO::PARAM_STR);
-            $stmtU->bindParam(':ogdesc', $data['og_description'], PDO::PARAM_STR);
-            $stmtU->bindParam(':ogimg', $data['og_image'], PDO::PARAM_STR);
-            $stmtU->bindParam(':schema', $data['schema_markup'], PDO::PARAM_STR);
+            $stmtU->bindValue(':tit', $data['meta_title'] ?? null, PDO::PARAM_STR);
+            $stmtU->bindValue(':desc', $data['meta_description'] ?? null, PDO::PARAM_STR);
+            $stmtU->bindValue(':can', $data['canonical_url'] ?? null, PDO::PARAM_STR);
+            $stmtU->bindValue(':ogtit', $data['og_title'] ?? null, PDO::PARAM_STR);
+            $stmtU->bindValue(':ogdesc', $data['og_description'] ?? null, PDO::PARAM_STR);
+            $stmtU->bindValue(':ogimg', $data['og_image'] ?? null, PDO::PARAM_STR);
+            $stmtU->bindValue(':schema', $schemaJson, $schemaJson === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmtU->bindParam(':id', $existing['id'], PDO::PARAM_INT);
             $stmtU->execute();
-            
+
             Audit::log((int) $admin['id'], $siteId, 'update', 'seo_metadata', $existing['id'], null, $data);
             Response::success(['id' => $existing['id']], 'SEO Metadata updated');
         } else {
             $stmtI = $db->prepare(
-                'INSERT INTO seo_metadata (site_id, entity_type, entity_id, meta_title, meta_description, canonical_url, og_title, og_description, og_image, schema_markup, created_at)
+                'INSERT INTO seo_metadata (site_id, entity_type, entity_id, meta_title, meta_description, canonical_url, og_title, og_description, og_image, schema_json, created_at)
                  VALUES (:site_id, :type, :eid, :tit, :desc, :can, :ogtit, :ogdesc, :ogimg, :schema, NOW())'
             );
             $stmtI->bindParam(':site_id', $siteId, PDO::PARAM_INT);
             $stmtI->bindParam(':type', $data['entity_type'], PDO::PARAM_STR);
             $stmtI->bindParam(':eid', $data['entity_id'], PDO::PARAM_INT);
-            $stmtI->bindParam(':tit', $data['meta_title'], PDO::PARAM_STR);
-            $stmtI->bindParam(':desc', $data['meta_description'], PDO::PARAM_STR);
-            $stmtI->bindParam(':can', $data['canonical_url'], PDO::PARAM_STR);
-            $stmtI->bindParam(':ogtit', $data['og_title'], PDO::PARAM_STR);
-            $stmtI->bindParam(':ogdesc', $data['og_description'], PDO::PARAM_STR);
-            $stmtI->bindParam(':ogimg', $data['og_image'], PDO::PARAM_STR);
-            $stmtI->bindParam(':schema', $data['schema_markup'], PDO::PARAM_STR);
+            $stmtI->bindValue(':tit', $data['meta_title'] ?? null, PDO::PARAM_STR);
+            $stmtI->bindValue(':desc', $data['meta_description'] ?? null, PDO::PARAM_STR);
+            $stmtI->bindValue(':can', $data['canonical_url'] ?? null, PDO::PARAM_STR);
+            $stmtI->bindValue(':ogtit', $data['og_title'] ?? null, PDO::PARAM_STR);
+            $stmtI->bindValue(':ogdesc', $data['og_description'] ?? null, PDO::PARAM_STR);
+            $stmtI->bindValue(':ogimg', $data['og_image'] ?? null, PDO::PARAM_STR);
+            $stmtI->bindValue(':schema', $schemaJson, $schemaJson === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmtI->execute();
 
             $newId = (int) $db->lastInsertId();

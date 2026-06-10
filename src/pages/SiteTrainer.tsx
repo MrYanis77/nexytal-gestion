@@ -1,93 +1,81 @@
-import { useState } from 'react';
-import { useApp, Formateur, BlogArticle } from '@/contexts/AppContext';
+import { useMemo, useState } from 'react';
+import { BlogArticle } from '@/contexts/AppContext';
 import { useFetch } from '@/hooks/useFetch';
 import { api } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api-errors';
+import { blogPostFromApi, blogPostToApi, buildBlogArticleFields, buildBlogCategoryFields } from '@/lib/mappers';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
-import { FormModal, ConfirmDelete, FieldDef } from '@/components/FormModal';
+import { FormModal, ConfirmDelete } from '@/components/FormModal';
 import { BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
-import { nanoid } from 'nanoid';
 
 const COLOR = '#0891B2';
 
-const FORMATEUR_FIELDS: FieldDef[] = [
-  { key: 'nom', label: 'Nom complet', type: 'text', required: true },
-  { key: 'email', label: 'Email', type: 'email' },
-  { key: 'region', label: 'Région', type: 'select', options: [
-    { value: 'Île-de-France', label: 'Île-de-France' }, { value: 'Auvergne-Rhône-Alpes', label: 'Auvergne-Rhône-Alpes' },
-    { value: 'Nouvelle-Aquitaine', label: 'Nouvelle-Aquitaine' }, { value: 'Occitanie', label: 'Occitanie' },
-    { value: 'Hauts-de-France', label: 'Hauts-de-France' }, { value: 'PACA', label: 'PACA' },
-    { value: 'Grand Est', label: 'Grand Est' }, { value: 'Bretagne', label: 'Bretagne' },
-  ]},
-  { key: 'tjm', label: 'TJM', type: 'text', placeholder: 'ex. 750 €' },
-  { key: 'bio', label: 'Biographie', type: 'textarea', span: true },
-  { key: 'disponibilite', label: 'Disponible', type: 'switch' },
-  { key: 'statut', label: 'Statut', type: 'select', options: [
-    { value: 'actif', label: 'Actif' }, { value: 'inactif', label: 'Inactif' },
-  ]},
-];
-
-const ARTICLE_FIELDS: FieldDef[] = [
-  { key: 'titre', label: 'Titre', type: 'text', required: true, span: true },
-  { key: 'extrait', label: 'Extrait', type: 'textarea', span: true },
-  { key: 'categorie', label: 'Catégorie', type: 'select', options: [
-    { value: 'Formation', label: 'Formation' }, { value: 'IA', label: 'IA' },
-    { value: 'Cybersécurité', label: 'Cybersécurité' }, { value: 'Cloud', label: 'Cloud' },
-    { value: 'Management', label: 'Management' }, { value: 'RH', label: 'RH' },
-  ]},
-  { key: 'auteur', label: 'Auteur', type: 'text' },
-  { key: 'date', label: 'Date', type: 'date' },
-  { key: 'statut', label: 'Statut', type: 'select', options: [{ value: 'publie', label: 'Publié' }, { value: 'brouillon', label: 'Brouillon' }] },
-];
-
 export default function SiteTrainer() {
-  const { data, setData } = useApp();
-  const [tab, setTab] = useState('formateurs');
-  const [modal, setModal] = useState<{ type: string; item?: unknown } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; label: string } | null>(null);
+  const [modal, setModal] = useState<{ item?: BlogArticle } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; label: string } | null>(null);
 
-  const { data: formateursData, refetch: refetchF } = useFetch<{ data: Formateur[] }>('/formation/trainers');
-  const { data: articlesData, refetch: refetchA } = useFetch<{ data: BlogArticle[] }>('/blog/posts?site=trainer');
+  const { data: articlesData, refetch: refetchA } = useFetch<{ data: Record<string, unknown>[] }>('/blog/posts?site_id=5');
+  const { data: blogCategoriesData, refetch: refetchBc } = useFetch<{ data: any[] }>('/blog/categories?site_id=5');
 
-  const formateurs = formateursData?.data || [];
-  const articles = articlesData?.data || [];
+  const blogCategoryOptions = useMemo(
+    () => (blogCategoriesData?.data ?? []).map(c => ({ value: String(c.id), label: c.name })),
+    [blogCategoriesData],
+  );
 
-  const saveFormateur = async (raw: Record<string, unknown>) => {
-    const item = modal?.item as Formateur | undefined;
-    try {
-      if (item) {
-        await api.put(`/formation/trainers/${item.id}`, raw);
-        toast.success('Formateur mis à jour.');
-      } else {
-        await api.post('/formation/trainers', raw);
-        toast.success('Formateur créé.');
-      }
-      refetchF();
-    } catch { toast.error('Erreur lors de la sauvegarde.'); }
-  };
+  const articles = useMemo(() => (articlesData?.data ?? []).map(blogPostFromApi), [articlesData]);
+  const articleFields = useMemo(() => buildBlogArticleFields(blogCategoryOptions), [blogCategoryOptions]);
+  const blogCategoryFields = useMemo(() => buildBlogCategoryFields(), []);
 
   const saveArticle = async (raw: Record<string, unknown>) => {
-    const item = modal?.item as BlogArticle | undefined;
+    const item = modal?.item;
     try {
+      const payload = blogPostToApi(raw);
       if (item) {
-        await api.put(`/blog/posts/${item.id}`, raw);
+        await api.put(`/blog/posts/${item.id}?site_id=5`, payload);
         toast.success('Article mis à jour.');
       } else {
-        await api.post('/blog/posts', { ...raw, site: 'trainer' });
+        await api.post('/blog/posts?site_id=5', payload);
         toast.success('Article créé.');
       }
       refetchA();
-    } catch { toast.error('Erreur lors de la sauvegarde.'); }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
+  };
+
+  const saveBlogCategory = async (raw: Record<string, unknown>) => {
+    const item = modal?.item as any;
+    try {
+      if (item) {
+        await api.put(`/blog/categories/${item.id}?site_id=5`, raw);
+        toast.success('Catégorie mise à jour.');
+      } else {
+        await api.post('/blog/categories?site_id=5', raw);
+        toast.success('Catégorie créée.');
+      }
+      refetchBc();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la sauvegarde.'));
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      if (deleteTarget.type === 'formateur') { await api.delete(`/formation/trainers/${deleteTarget.id}`); refetchF(); }
-      if (deleteTarget.type === 'article') { await api.delete(`/blog/posts/${deleteTarget.id}`); refetchA(); }
-      toast.success('Élément supprimé.');
-    } catch { toast.error('Erreur lors de la suppression.'); }
+      if ((deleteTarget as any).type === 'blog_category') {
+        await api.delete(`/blog/categories/${deleteTarget.id}?site_id=5`);
+        toast.success('Catégorie supprimée.');
+        refetchBc();
+      } else {
+        await api.delete(`/blog/posts/${deleteTarget.id}?site_id=5`);
+        toast.success('Article supprimé.');
+        refetchA();
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Erreur lors de la suppression.'));
+    }
     setDeleteTarget(null);
   };
 
@@ -96,71 +84,61 @@ export default function SiteTrainer() {
       <SiteHeader
         icon={<BookOpen className="w-5 h-5" />}
         title="Nexytal Trainer"
-        description="Gestion des formateurs et articles du blog"
+        description="Articles du blog formateurs (pas de table formateurs en BDD v3)"
         color={COLOR}
         tabs={[
-          { key: 'formateurs', label: 'Formateurs', count: formateurs.length },
           { key: 'articles', label: 'Blog', count: articles.length },
+          { key: 'blog_categories', label: 'Catégories', count: blogCategoriesData?.data?.length ?? 0 }
         ]}
-        activeTab={tab}
-        onTabChange={setTab}
+        activeTab={modal && typeof (modal as any).type === 'string' ? (modal as any).type === 'blog_category' ? 'blog_categories' : 'articles' : 'articles'}
+        onTabChange={() => {}}
       />
 
       <div className="flex-1 overflow-y-auto p-6">
-        {tab === 'formateurs' && (
-          <DataTable<Formateur>
-            data={formateurs}
-            accentColor={COLOR}
-            addLabel="Nouveau formateur"
-            onAdd={() => setModal({ type: 'formateur' })}
-            onEdit={item => setModal({ type: 'formateur', item })}
-            onDelete={item => setDeleteTarget({ type: 'formateur', id: item.id, label: item.nom })}
-            searchKeys={['nom', 'email', 'region']}
-            columns={[
-              { key: 'nom', label: 'Formateur', render: f => (
-                <div>
-                  <p className="font-medium text-foreground">{f.nom}</p>
-                  <p className="text-xs text-muted-foreground">{f.email}</p>
-                </div>
-              )},
-              { key: 'region', label: 'Région', hidden: 'sm' },
-              { key: 'tjm', label: 'TJM', hidden: 'md' },
-              { key: 'disponibilite', label: 'Dispo', render: f => (
-                <span className={`text-xs px-2 py-0.5 rounded-full ${f.disponibilite ? 'bg-green-500/15 text-green-400' : 'bg-secondary text-muted-foreground'}`}>
-                  {f.disponibilite ? 'Oui' : 'Non'}
-                </span>
-              ), hidden: 'lg' },
-              { key: 'statut', label: 'Statut', render: f => <StatusBadge statut={f.statut} /> },
-            ]}
-          />
-        )}
+        <DataTable<BlogArticle>
+          data={articles}
+          accentColor={COLOR}
+          addLabel="Nouvel article"
+          onAdd={() => setModal({})}
+          onEdit={item => setModal({ item })}
+          onDelete={item => setDeleteTarget({ id: item.id, label: item.titre })}
+          searchKeys={['titre', 'categorie', 'auteur']}
+          columns={[
+            { key: 'titre', label: 'Titre', render: a => <span className="font-medium text-foreground">{a.titre}</span> },
+            { key: 'categorie', label: 'Catégorie', hidden: 'sm' },
+            { key: 'auteur', label: 'Auteur', hidden: 'md' },
+            { key: 'date', label: 'Date', hidden: 'lg' },
+            { key: 'statut', label: 'Statut', render: a => <StatusBadge statut={a.statut} /> },
+          ]}
+        />
 
-        {tab === 'articles' && (
-          <DataTable<BlogArticle>
-            data={articles}
+        <div className="mt-8">
+          <DataTable<any>
+            data={blogCategoriesData?.data ?? []}
             accentColor={COLOR}
-            addLabel="Nouvel article"
-            onAdd={() => setModal({ type: 'article' })}
-            onEdit={item => setModal({ type: 'article', item })}
-            onDelete={item => setDeleteTarget({ type: 'article', id: item.id, label: item.titre })}
-            searchKeys={['titre', 'categorie', 'auteur']}
+            addLabel="Nouvelle catégorie"
+            onAdd={() => setModal({ type: 'blog_category' } as any)}
+            onEdit={item => setModal({ type: 'blog_category', item } as any)}
+            onDelete={item => setDeleteTarget({ id: item.id, label: item.name, type: 'blog_category' } as any)}
+            searchKeys={['name', 'slug']}
             columns={[
-              { key: 'titre', label: 'Titre', render: a => <span className="font-medium text-foreground">{a.titre}</span> },
-              { key: 'categorie', label: 'Catégorie', hidden: 'sm' },
-              { key: 'auteur', label: 'Auteur', hidden: 'md' },
-              { key: 'date', label: 'Date', hidden: 'lg' },
-              { key: 'statut', label: 'Statut', render: a => <StatusBadge statut={a.statut} /> },
+              { key: 'name', label: 'Nom', render: c => <span className="font-medium text-foreground">{c.name}</span> },
+              { key: 'slug', label: 'Slug' },
+              { key: 'color', label: 'Couleur', render: c => (
+                c.color ? <div className="flex items-center gap-2"><div className="w-4 h-4 rounded-full" style={{ background: c.color }} />{c.color}</div> : '-'
+              ) },
+              { key: 'is_active', label: 'Statut', render: c => <StatusBadge statut={c.is_active ? 'active' : 'inactive'} /> },
             ]}
           />
-        )}
+        </div>
       </div>
 
-      <FormModal open={modal?.type === 'formateur'} onClose={() => setModal(null)} onSave={saveFormateur}
-        title={modal?.item ? 'Modifier le formateur' : 'Nouveau formateur'}
-        fields={FORMATEUR_FIELDS} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
-      <FormModal open={modal?.type === 'article'} onClose={() => setModal(null)} onSave={saveArticle}
+      <FormModal open={modal !== null && (modal as any).type !== 'blog_category'} onClose={() => setModal(null)} onSave={saveArticle}
         title={modal?.item ? 'Modifier l\'article' : 'Nouvel article'}
-        fields={ARTICLE_FIELDS} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
+        fields={articleFields} initialData={modal?.item as unknown as Record<string, unknown>} accentColor={COLOR} />
+      <FormModal open={modal !== null && (modal as any).type === 'blog_category'} onClose={() => setModal(null)} onSave={saveBlogCategory}
+        title={modal?.item ? 'Modifier la catégorie' : 'Nouvelle catégorie'}
+        fields={blogCategoryFields} initialData={modal?.item as any} accentColor={COLOR} />
       <ConfirmDelete open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} label={deleteTarget?.label} />
     </div>
   );

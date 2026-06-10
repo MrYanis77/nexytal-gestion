@@ -27,20 +27,31 @@ function registerRecrutementProfessionsRoutes(Router $router): void
             'INSERT INTO recrutement_professions (site_id, slug, name, sector, description, image_url, color, is_active, created_at)
              VALUES (:site_id, :slug, :name, :sector, :description, :image_url, :color, :is_active, NOW())'
         );
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->bindParam(':slug', $slug, PDO::PARAM_STR);
-        $stmt->bindParam(':name', $data['name'], PDO::PARAM_STR);
-        $sector = $data['sector'] ?? null;
-        $stmt->bindParam(':sector', $sector, PDO::PARAM_STR);
-        $desc = $data['description'] ?? null;
-        $stmt->bindParam(':description', $desc, PDO::PARAM_STR);
-        $img = $data['image_url'] ?? null;
-        $stmt->bindParam(':image_url', $img, PDO::PARAM_STR);
-        $color = $data['color'] ?? null;
-        $stmt->bindParam(':color', $color, PDO::PARAM_STR);
+        $stmt->bindValue(':site_id', $siteId, PDO::PARAM_INT);
+        $stmt->bindValue(':slug', $slug, PDO::PARAM_STR);
+        $stmt->bindValue(':name', $data['name'], PDO::PARAM_STR);
+        $sector = !empty($data['sector']) ? $data['sector'] : null;
+        $stmt->bindValue(':sector', $sector, $sector === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+        $desc = !empty($data['description']) ? $data['description'] : null;
+        $stmt->bindValue(':description', $desc, $desc === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+        $img = !empty($data['image_url']) ? $data['image_url'] : null;
+        $stmt->bindValue(':image_url', $img, $img === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+        $color = !empty($data['color']) ? $data['color'] : null;
+        $stmt->bindValue(':color', $color, $color === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
         $isActive = isset($data['is_active']) ? (int) $data['is_active'] : 1;
-        $stmt->bindParam(':is_active', $isActive, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->bindValue(':is_active', $isActive, PDO::PARAM_INT);
+
+        try {
+            $stmt->execute();
+        } catch (\PDOException $e) {
+            if ((int) ($e->errorInfo[1] ?? 0) === 1062) {
+                Response::badRequest('Une profession avec ce nom ou ce slug existe déjà pour ce site');
+                return;
+            }
+            Response::serverError('Failed to create profession', $e->getMessage());
+            return;
+        }
+
         $newId = (int) $db->lastInsertId();
         Audit::log((int) $admin['id'], $siteId, 'create', 'recrutement_profession', $newId, null, $data);
         Response::created(['id' => $newId]);

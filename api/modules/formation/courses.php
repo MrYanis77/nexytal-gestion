@@ -88,7 +88,7 @@ function registerFormationCoursesRoutes(Router $router): void
                 'INSERT INTO formation_courses 
                  (site_id, category_id, title, slug, subtitle, video_url, duration, price, is_cpf_eligible, is_alternance, rncp_repertoire, rncp_code, rncp_title, rncp_level, rncp_url, presentation_title, presentation_text, cta_title, cta_subtitle, meta_title, meta_description, status, created_by, updated_by, created_at)
                  VALUES 
-                 (:site_id, :cat_id, :title, :slug, :sub, :vid, :dur, :price, :cpf, :alt, :rncp_rep, :rncp_code, :rncp_tit, :rncp_lvl, :rncp_url, :pres_tit, :pres_txt, :cta_tit, :cta_sub, :meta_tit, :meta_desc, :status, :created_by, :created_by, NOW())'
+                 (:site_id, :cat_id, :title, :slug, :sub, :vid, :dur, :price, :cpf, :alt, :rncp_rep, :rncp_code, :rncp_tit, :rncp_lvl, :rncp_url, :pres_tit, :pres_txt, :cta_tit, :cta_sub, :meta_tit, :meta_desc, :status, :created_by, :updated_by, NOW())'
             );
             $stmt->bindValue(':site_id', $siteId, PDO::PARAM_INT);
             $stmt->bindValue(':cat_id', $data['category_id'], PDO::PARAM_INT);
@@ -97,13 +97,15 @@ function registerFormationCoursesRoutes(Router $router): void
             $stmt->bindValue(':sub', $data['subtitle'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':vid', $data['video_url'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':dur', $data['duration'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':price', $data['price'] ?? null, PDO::PARAM_STR);
+            $price = $data['price'] ?? null;
+            $stmt->bindValue(':price', $price, $price === null || $price === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':cpf', isset($data['is_cpf_eligible']) ? (int)$data['is_cpf_eligible'] : 0, PDO::PARAM_INT);
             $stmt->bindValue(':alt', isset($data['is_alternance']) ? (int)$data['is_alternance'] : 0, PDO::PARAM_INT);
             $stmt->bindValue(':rncp_rep', $data['rncp_repertoire'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':rncp_code', $data['rncp_code'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':rncp_tit', $data['rncp_title'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':rncp_lvl', $data['rncp_level'] ?? null, PDO::PARAM_STR);
+            $rncpLvl = $data['rncp_level'] ?? null;
+            $stmt->bindValue(':rncp_lvl', $rncpLvl, $rncpLvl === null || $rncpLvl === '' ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':rncp_url', $data['rncp_url'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':pres_tit', $data['presentation_title'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':pres_txt', $data['presentation_text'] ?? null, PDO::PARAM_STR);
@@ -113,6 +115,7 @@ function registerFormationCoursesRoutes(Router $router): void
             $stmt->bindValue(':meta_desc', $data['meta_description'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':status', $data['status'] ?? 'draft', PDO::PARAM_STR);
             $stmt->bindValue(':created_by', $admin['id'], PDO::PARAM_INT);
+            $stmt->bindValue(':updated_by', $admin['id'], PDO::PARAM_INT);
             $stmt->execute();
             
             $courseId = (int) $db->lastInsertId();
@@ -132,7 +135,14 @@ function registerFormationCoursesRoutes(Router $router): void
             if (!empty($data['jobs']) && is_array($data['jobs'])) {
                 $stmtJ = $db->prepare('INSERT INTO formation_jobs (course_id, title, salary_min, salary_max, sort_order) VALUES (:cid, :tit, :min, :max, :sort)');
                 foreach ($data['jobs'] as $idx => $j) {
-                    $stmtJ->execute([':cid' => $courseId, ':tit' => $j['title'], ':min' => $j['salary_min'] ?? null, ':max' => $j['salary_max'] ?? null, ':sort' => $j['sort_order'] ?? $idx]);
+                    $salMin = $j['salary_min'] ?? null;
+                    $salMax = $j['salary_max'] ?? null;
+                    $stmtJ->bindValue(':cid', $courseId, PDO::PARAM_INT);
+                    $stmtJ->bindValue(':tit', $j['title'], PDO::PARAM_STR);
+                    $stmtJ->bindValue(':min', $salMin, $salMin === null || $salMin === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+                    $stmtJ->bindValue(':max', $salMax, $salMax === null || $salMax === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+                    $stmtJ->bindValue(':sort', $j['sort_order'] ?? $idx, PDO::PARAM_INT);
+                    $stmtJ->execute();
                 }
             }
 
@@ -199,7 +209,14 @@ function registerFormationCoursesRoutes(Router $router): void
                 $db->prepare("DELETE FROM formation_jobs WHERE course_id = :id")->execute([':id' => $id]);
                 $stmtJ = $db->prepare('INSERT INTO formation_jobs (course_id, title, salary_min, salary_max, sort_order) VALUES (:cid, :tit, :min, :max, :sort)');
                 foreach ($data['jobs'] as $idx => $j) {
-                    $stmtJ->execute([':cid' => $id, ':tit' => $j['title'], ':min' => $j['salary_min'] ?? null, ':max' => $j['salary_max'] ?? null, ':sort' => $j['sort_order'] ?? $idx]);
+                    $salMin = $j['salary_min'] ?? null;
+                    $salMax = $j['salary_max'] ?? null;
+                    $stmtJ->bindValue(':cid', $id, PDO::PARAM_INT);
+                    $stmtJ->bindValue(':tit', $j['title'], PDO::PARAM_STR);
+                    $stmtJ->bindValue(':min', $salMin, $salMin === null || $salMin === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+                    $stmtJ->bindValue(':max', $salMax, $salMax === null || $salMax === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+                    $stmtJ->bindValue(':sort', $j['sort_order'] ?? $idx, PDO::PARAM_INT);
+                    $stmtJ->execute();
                 }
             }
 

@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useFetch } from '@/hooks/useFetch';
-import { api } from '@/lib/api';
+import { blogPostFromApi } from '@/lib/mappers';
 import { Link } from 'wouter';
 import { GraduationCap, Stethoscope, Briefcase, TrendingUp, Heart, BookOpen, ArrowRight, FileText, Users, Calendar } from 'lucide-react';
 
@@ -67,7 +68,7 @@ export default function Dashboard() {
   // Pour les statistiques, dans un cas réel on aurait une route /api/dashboard/stats
   // Ici on fait quelques requêtes rapides pour les longueurs ou on met des placeholders
   const { data: formations } = useFetch<{ data: unknown[] }>('/formation/courses');
-  const { data: articles } = useFetch<{ data: any[] }>('/blog/posts');
+  const { data: articles } = useFetch<{ data: Record<string, unknown>[] }>('/blog/posts?site=formation');
   const { data: coaches } = useFetch<{ data: unknown[] }>('/coaching/coaches');
 
   const stats = [
@@ -76,12 +77,18 @@ export default function Dashboard() {
     { label: 'Offres IT', value: 0, icon: Briefcase, color: '#2563EB' }, // TODO: Fetch
     { label: 'Articles', value: articles?.data?.length || 0, icon: FileText, color: '#D97706' },
     { label: 'Coachs', value: coaches?.data?.length || 0, icon: Heart, color: '#DC2626' },
-    { label: 'Formateurs', value: 0, icon: BookOpen, color: '#0891B2' },
+    { label: 'Articles Trainer', value: 0, icon: BookOpen, color: '#0891B2' },
     { label: 'Créneaux', value: 0, icon: Calendar, color: '#6366F1' },
     { label: 'Métiers', value: 0, icon: Users, color: '#EC4899' },
   ];
 
-  const recentArticles = (articles?.data || []).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const recentArticles = useMemo(
+    () => (articles?.data ?? [])
+      .map(blogPostFromApi)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 5),
+    [articles],
+  );
 
   return (
     <div className="p-6 space-y-8 fade-up">

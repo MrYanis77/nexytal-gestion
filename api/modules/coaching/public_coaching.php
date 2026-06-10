@@ -115,28 +115,26 @@ function registerPublicCoachingRoutes(Router $router): void
 
         $db = getDb();
         $stmt = $db->prepare(
-            'INSERT INTO coaching_diagnostic_requests (coach_id, first_name, last_name, email, phone, company, request_type, message, status, gdpr_consent, created_at)
-             VALUES (:cid, :fn, :ln, :email, :phone, :comp, :rtype, :msg, :status, :gdpr, NOW())'
+            'INSERT INTO coaching_diagnostic_requests (coach_id, first_name, last_name, email, phone, company, coaching_type, message, status, created_at)
+             VALUES (:cid, :fn, :ln, :email, :phone, :comp, :ctype, :msg, :status, NOW())'
         );
-        $cid = $data['coach_id'] ?? null;
-        $stmt->bindParam(':cid', $cid, PDO::PARAM_INT);
+        $cid = isset($data['coach_id']) && $data['coach_id'] !== '' ? (int) $data['coach_id'] : null;
+        $stmt->bindValue(':cid', $cid, $cid === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
         $fn = Validator::sanitizeString($data['first_name']);
-        $stmt->bindParam(':fn', $fn, PDO::PARAM_STR);
+        $stmt->bindValue(':fn', $fn, PDO::PARAM_STR);
         $ln = Validator::sanitizeString($data['last_name']);
-        $stmt->bindParam(':ln', $ln, PDO::PARAM_STR);
-        $stmt->bindParam(':email', $data['email'], PDO::PARAM_STR);
+        $stmt->bindValue(':ln', $ln, PDO::PARAM_STR);
+        $stmt->bindValue(':email', $data['email'], PDO::PARAM_STR);
         $phone = $data['phone'] ?? null;
-        $stmt->bindParam(':phone', $phone, PDO::PARAM_STR);
+        $stmt->bindValue(':phone', $phone, PDO::PARAM_STR);
         $comp = $data['company'] ?? null;
-        $stmt->bindParam(':comp', $comp, PDO::PARAM_STR);
-        $rtype = $data['request_type'];
-        $stmt->bindParam(':rtype', $rtype, PDO::PARAM_STR);
+        $stmt->bindValue(':comp', $comp, PDO::PARAM_STR);
+        $ctype = $data['request_type'] ?? $data['coaching_type'] ?? 'general';
+        $stmt->bindValue(':ctype', $ctype, PDO::PARAM_STR);
         $msg = isset($data['message']) ? Validator::sanitizeString($data['message']) : null;
-        $stmt->bindParam(':msg', $msg, PDO::PARAM_STR);
+        $stmt->bindValue(':msg', $msg, PDO::PARAM_STR);
         $status = 'new';
-        $stmt->bindParam(':status', $status, PDO::PARAM_STR);
-        $gdpr = (int) $data['gdpr_consent'];
-        $stmt->bindParam(':gdpr', $gdpr, PDO::PARAM_INT);
+        $stmt->bindValue(':status', $status, PDO::PARAM_STR);
         $stmt->execute();
 
         Response::created(['id' => (int) $db->lastInsertId()], 'Diagnostic request submitted');
@@ -165,24 +163,22 @@ function registerPublicCoachingRoutes(Router $router): void
         if (!$stmt->fetch()) { Response::notFound('Coach not found or unavailable'); return; }
 
         $stmt = $db->prepare(
-            'INSERT INTO coaching_bookings (coach_id, client_first_name, client_last_name, client_email, client_phone, requested_date, message, status, gdpr_consent, created_at)
-             VALUES (:cid, :fn, :ln, :email, :phone, :rdate, :msg, :status, :gdpr, NOW())'
+            'INSERT INTO coaching_bookings (coach_id, first_name, last_name, email, phone, booked_for, notes, status, created_at)
+             VALUES (:cid, :fn, :ln, :email, :phone, :booked, :notes, :status, NOW())'
         );
-        $stmt->bindParam(':cid', $data['coach_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':cid', (int) $data['coach_id'], PDO::PARAM_INT);
         $fn = Validator::sanitizeString($data['client_first_name']);
-        $stmt->bindParam(':fn', $fn, PDO::PARAM_STR);
+        $stmt->bindValue(':fn', $fn, PDO::PARAM_STR);
         $ln = Validator::sanitizeString($data['client_last_name']);
-        $stmt->bindParam(':ln', $ln, PDO::PARAM_STR);
-        $stmt->bindParam(':email', $data['client_email'], PDO::PARAM_STR);
+        $stmt->bindValue(':ln', $ln, PDO::PARAM_STR);
+        $stmt->bindValue(':email', $data['client_email'], PDO::PARAM_STR);
         $phone = $data['client_phone'] ?? null;
-        $stmt->bindParam(':phone', $phone, PDO::PARAM_STR);
-        $stmt->bindParam(':rdate', $data['requested_date'], PDO::PARAM_STR);
+        $stmt->bindValue(':phone', $phone, PDO::PARAM_STR);
+        $stmt->bindValue(':booked', $data['requested_date'], PDO::PARAM_STR);
         $msg = isset($data['message']) ? Validator::sanitizeString($data['message']) : null;
-        $stmt->bindParam(':msg', $msg, PDO::PARAM_STR);
+        $stmt->bindValue(':notes', $msg, PDO::PARAM_STR);
         $status = 'pending';
-        $stmt->bindParam(':status', $status, PDO::PARAM_STR);
-        $gdpr = (int) $data['gdpr_consent'];
-        $stmt->bindParam(':gdpr', $gdpr, PDO::PARAM_INT);
+        $stmt->bindValue(':status', $status, PDO::PARAM_STR);
         $stmt->execute();
 
         Response::created(['id' => (int) $db->lastInsertId()], 'Booking request submitted');

@@ -37,6 +37,8 @@ export interface User {
   id: string;
   username: string;
   email: string;
+  first_name?: string;
+  last_name?: string;
   role: Role;
   sites: SiteId[];
   createdAt: string;
@@ -49,14 +51,26 @@ export interface User {
 export interface Formation {
   id: string;
   titre: string;
+  subtitle?: string;
+  category_id?: string;
   categorie: string;
   description: string;
   programme: string;
+  video_url?: string;
   duree: string;
-  niveau: string;
+  price?: string;
   certifiante: boolean;
+  is_alternance?: boolean;
+  rncp_repertoire?: string;
   rncp?: string;
-  image?: string;
+  rncp_title?: string;
+  rncp_level?: string;
+  rncp_url?: string;
+  presentation_title?: string;
+  cta_title?: string;
+  cta_subtitle?: string;
+  meta_title?: string;
+  meta_description?: string;
   statut: 'publie' | 'brouillon';
   createdAt: string;
 }
@@ -65,11 +79,17 @@ export interface BlogArticle {
   id: string;
   titre: string;
   extrait: string;
+  contenu?: string;
+  category_id?: string;
   categorie: string;
+  author_id?: string;
   auteur: string;
+  cover_image_url?: string;
+  read_time_mins?: string;
+  is_featured?: boolean;
   date: string;
-  image?: string;
-  lien?: string;
+  meta_title?: string;
+  meta_description?: string;
   statut: 'publie' | 'brouillon';
   site: SiteId;
 }
@@ -79,16 +99,22 @@ export interface OffreEmploi {
   titre: string;
   entreprise: string;
   lieu: string;
-  contrat: 'CDI' | 'CDD' | 'Intérim' | 'Freelance' | 'Stage';
+  postal_code?: string;
+  contract_type_id?: string;
+  contrat: string;
+  profession_id?: string;
+  job_id?: string;
   salaire?: string;
+  duration?: string;
   secteur: string;
+  short_desc?: string;
   description: string;
   experience?: string;
   urgent: boolean;
   date: string;
+  expires_at?: string;
   statut: 'publie' | 'brouillon';
   site: SiteId;
-  tags?: string[];
 }
 
 export interface Metier {
@@ -97,24 +123,26 @@ export interface Metier {
   slug: string;
   secteur: string;
   description: string;
-  salaire?: string;
-  debouches?: string;
-  image?: string;
   statut: 'publie' | 'brouillon';
 }
 
 export interface Coach {
   id: string;
   nom: string;
+  email: string;
+  phone?: string;
+  avatar_url?: string;
   titre: string;
+  short_bio?: string;
   bio: string;
-  specialites: string[];
-  certifications: string[];
-  langues: string[];
+  experience_years?: string;
+  languages?: string;
+  city_id?: string;
   localisation: string;
-  photo?: string;
   visible: boolean;
-  ordre: number;
+  statut: string;
+  meta_title?: string;
+  meta_description?: string;
   createdAt: string;
 }
 
@@ -123,15 +151,11 @@ export interface Creneau {
   date: string;
   heure: string;
   coach?: string;
-  capacite: number;
-  statut: 'disponible' | 'reserve' | 'annule';
-  reservation?: {
-    prenom: string;
-    nom: string;
-    email: string;
-    telephone: string;
-    profil: string;
-  };
+  coach_nom?: string;
+  client_nom?: string;
+  client_email?: string;
+  statut: string;
+  notes?: string;
 }
 
 export interface Formateur {

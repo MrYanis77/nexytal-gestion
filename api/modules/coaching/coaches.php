@@ -57,7 +57,12 @@ function registerCoachingCoachesRoutes(Router $router): void
         $admin = Middleware::requireRole(['superadmin', 'admin', 'editor']);
         $data = Router::getJsonBody();
 
-        Validator::make($data)->required('first_name', 'First name')->required('last_name', 'Last name')->validate();
+        Validator::make($data)
+            ->required('first_name', 'First name')
+            ->required('last_name', 'Last name')
+            ->required('email', 'Email')
+            ->required('title', 'Title')
+            ->validate();
         $slug = $data['slug'] ?? Validator::slugify($data['first_name'] . ' ' . $data['last_name']);
         
         $db = getDb();
@@ -79,8 +84,10 @@ function registerCoachingCoachesRoutes(Router $router): void
             $stmt->bindValue(':title', $data['title'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':sbio', $data['short_bio'] ?? null, PDO::PARAM_STR);
             $stmt->bindValue(':fbio', $data['full_bio'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':exp', $data['experience_years'] ?? null, PDO::PARAM_INT);
-            $stmt->bindValue(':city_id', $data['city_id'] ?? null, PDO::PARAM_INT);
+            $exp = isset($data['experience_years']) ? (int) $data['experience_years'] : 0;
+            $stmt->bindValue(':exp', $exp, PDO::PARAM_INT);
+            $cityId = isset($data['city_id']) && $data['city_id'] !== '' ? (int) $data['city_id'] : null;
+            $stmt->bindValue(':city_id', $cityId, $cityId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $lang = isset($data['languages']) ? json_encode($data['languages'], JSON_UNESCAPED_UNICODE) : null;
             $stmt->bindValue(':lang', $lang, PDO::PARAM_STR);
             $stmt->bindValue(':status', $data['status'] ?? 'pending', PDO::PARAM_STR);
@@ -101,7 +108,11 @@ function registerCoachingCoachesRoutes(Router $router): void
             if (!empty($data['certifications']) && is_array($data['certifications'])) {
                 $stmtC = $db->prepare('INSERT INTO coaching_coach_certifications (coach_id, certification_id, year_obtained) VALUES (:cid, :certid, :yr)');
                 foreach ($data['certifications'] as $cert) {
-                    $stmtC->execute([':cid' => $coachId, ':certid' => $cert['id'], ':yr' => $cert['year_obtained'] ?? null]);
+                    $yr = $cert['year_obtained'] ?? null;
+                    $stmtC->bindValue(':cid', $coachId, PDO::PARAM_INT);
+                    $stmtC->bindValue(':certid', (int) $cert['id'], PDO::PARAM_INT);
+                    $stmtC->bindValue(':yr', $yr, $yr === null || $yr === '' ? PDO::PARAM_NULL : PDO::PARAM_INT);
+                    $stmtC->execute();
                 }
             }
 
@@ -161,7 +172,11 @@ function registerCoachingCoachesRoutes(Router $router): void
                 $db->prepare("DELETE FROM coaching_coach_certifications WHERE coach_id = :id")->execute([':id' => $id]);
                 $stmtC = $db->prepare('INSERT INTO coaching_coach_certifications (coach_id, certification_id, year_obtained) VALUES (:cid, :certid, :yr)');
                 foreach ($data['certifications'] as $cert) {
-                    $stmtC->execute([':cid' => $id, ':certid' => $cert['id'], ':yr' => $cert['year_obtained'] ?? null]);
+                    $yr = $cert['year_obtained'] ?? null;
+                    $stmtC->bindValue(':cid', $id, PDO::PARAM_INT);
+                    $stmtC->bindValue(':certid', (int) $cert['id'], PDO::PARAM_INT);
+                    $stmtC->bindValue(':yr', $yr, $yr === null || $yr === '' ? PDO::PARAM_NULL : PDO::PARAM_INT);
+                    $stmtC->execute();
                 }
             }
 

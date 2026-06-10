@@ -32,7 +32,7 @@ function getDb(): PDO
         ];
 
         try {
-            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+            $pdo = new PDO($dsn, DB_USER, resolveDbPassword(), $options);
         } catch (PDOException $e) {
             error_log('PDO connection failed [' . DB_HOST . '/' . DB_NAME . ']: ' . $e->getMessage());
 
@@ -40,11 +40,13 @@ function getDb(): PDO
                 throw $e;
             }
 
+            $test = testDbConnection();
             http_response_code(500);
             echo json_encode([
                 'success' => false,
                 'error'   => 'Database connection failed',
-                'hint'    => 'Vérifiez DB_HOST, DB_NAME, DB_USER, DB_PASS dans api/config/.env ou config.local.php',
+                'hint'    => 'Vérifiez DB_PASSWORD dans api/config/.env (Ionos → réinitialiser le mot de passe dbu977482)',
+                'data'    => $test,
             ]);
             exit;
         }
@@ -75,13 +77,20 @@ function testDbConnection(): array
         PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
     ];
 
+    $envPassword = env('DB_PASSWORD', env('DB_PASS', ''));
+    $dbPassword = resolveDbPassword();
+
     $sources = [
-        'env_file'     => $GLOBALS['_env_loaded_files'] ?? [],
-        'config_local' => is_readable(__DIR__ . '/config.local.php'),
+        'env_file'              => $GLOBALS['_env_loaded_files'] ?? [],
+        'config_local'          => is_readable(__DIR__ . '/config.local.php'),
+        'env_password_set'      => $envPassword !== '',
+        'password_source'       => $envPassword !== '' ? 'env' : (defined('DB_PASS') ? 'config.local_or_default' : 'missing'),
+        'password_length'       => strlen($dbPassword),
+        'config_local_db_pass'  => defined('DB_PASS') && $envPassword === '',
     ];
 
     try {
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        $pdo = new PDO($dsn, DB_USER, $dbPassword, $options);
         $stmt = $pdo->query('SELECT DATABASE() AS db_name');
         $row = $stmt->fetch();
 
@@ -91,6 +100,7 @@ function testDbConnection(): array
             'database'        => $row['db_name'] ?? DB_NAME,
             'user'            => DB_USER,
             'config_sources'  => $sources,
+            'sites_count'     => (int) $pdo->query('SELECT COUNT(*) FROM core_sites')->fetchColumn(),
         ];
     } catch (PDOException $e) {
         error_log('PDO test connection failed [' . DB_HOST . '/' . DB_NAME . ']: ' . $e->getMessage());

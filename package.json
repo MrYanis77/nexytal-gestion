@@ -9,7 +9,12 @@
     "start": "NODE_ENV=production node dist/index.js",
     "preview": "vite preview --host",
     "check": "tsc --noEmit",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test:api": "node scripts/api-insert-tests.mjs",
+    "test:api:post": "node scripts/api-insert-tests.mjs",
+    "test:deploy": "node scripts/test-deploy.mjs",
+    "test:deploy:full": "node scripts/test-deploy.mjs --full",
+    "test:health:insert": "node scripts/test-health-insert.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
