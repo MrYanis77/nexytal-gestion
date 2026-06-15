@@ -21,7 +21,13 @@ require_once __DIR__ . '/core/Middleware.php';
 require_once __DIR__ . '/core/RateLimit.php';
 require_once __DIR__ . '/core/Audit.php';
 require_once __DIR__ . '/core/Validator.php';
+require_once __DIR__ . '/core/UploadDiskSpace.php';
+require_once __DIR__ . '/core/UploadUrl.php';
 require_once __DIR__ . '/core/Upload.php';
+require_once __DIR__ . '/core/AdminSession.php';
+require_once __DIR__ . '/core/ProductionSecurity.php';
+
+ProductionSecurity::assertBootConfig();
 
 // ===== AFFICHAGE ERREURS EN DEV =====
 if (APP_ENV === 'development') {
@@ -68,6 +74,7 @@ $router->get('/api/health', function () {
 });
 
 $router->get('/api/health/db', function () {
+    ProductionSecurity::assertDiagnosticsAllowed();
     $result = testDbConnection();
 
     if ($result['connected']) {
@@ -137,20 +144,30 @@ registerPublicBlogRoutes($router);
 
 // --- Module Recrutement ---
 require_once __DIR__ . '/modules/recrutement/sectors.php';
+require_once __DIR__ . '/modules/recrutement/entreprises.php';
+require_once __DIR__ . '/modules/recrutement/recruteurs.php';
+require_once __DIR__ . '/modules/recrutement/candidats.php';
+require_once __DIR__ . '/modules/recrutement/competences.php';
+require_once __DIR__ . '/modules/recrutement/users.php';
+require_once __DIR__ . '/modules/recrutement/externes.php';
+require_once __DIR__ . '/modules/recrutement/alertes.php';
+require_once __DIR__ . '/modules/recrutement/favorites.php';
 require_once __DIR__ . '/modules/recrutement/jobs.php';
-require_once __DIR__ . '/modules/recrutement/contract_types.php';
-require_once __DIR__ . '/modules/recrutement/professions.php';
 require_once __DIR__ . '/modules/recrutement/offers.php';
-require_once __DIR__ . '/modules/recrutement/tags.php';
 require_once __DIR__ . '/modules/recrutement/applications.php';
 require_once __DIR__ . '/modules/recrutement/public_recrutement.php';
 require_once __DIR__ . '/modules/recrutement/public_medical.php';
 registerRecrutementSectorsRoutes($router);
+registerRecrutementEntreprisesRoutes($router);
+registerRecrutementRecruteursRoutes($router);
+registerRecrutementCandidatsRoutes($router);
+registerRecrutementCompetencesRoutes($router);
+registerRecrutementUsersRoutes($router);
+registerRecrutementExternesRoutes($router);
+registerRecrutementAlertesRoutes($router);
+registerRecrutementFavoritesRoutes($router);
 registerRecrutementJobsRoutes($router);
-registerRecrutementContractTypesRoutes($router);
-registerRecrutementProfessionsRoutes($router);
 registerRecrutementOffersRoutes($router);
-registerRecrutementTagsRoutes($router);
 registerRecrutementApplicationsRoutes($router);
 registerPublicRecrutementRoutes($router);
 registerPublicMedicalRoutes($router);
@@ -163,29 +180,29 @@ registerFormationCategoriesRoutes($router);
 registerFormationCoursesRoutes($router);
 registerPublicFormationRoutes($router);
 
-// --- Module Coaching ---
-require_once __DIR__ . '/modules/coaching/cities.php';
-require_once __DIR__ . '/modules/coaching/specialties.php';
-require_once __DIR__ . '/modules/coaching/certifications.php';
-require_once __DIR__ . '/modules/coaching/coaches.php';
-require_once __DIR__ . '/modules/coaching/reviews.php';
-require_once __DIR__ . '/modules/coaching/bookings.php';
-require_once __DIR__ . '/modules/coaching/diagnostics.php';
-require_once __DIR__ . '/modules/coaching/public_coaching.php';
-registerCoachingCitiesRoutes($router);
-registerCoachingSpecialtiesRoutes($router);
-registerCoachingCertificationsRoutes($router);
-registerCoachingCoachesRoutes($router);
-registerCoachingReviewsRoutes($router);
-registerCoachingBookingsRoutes($router);
-registerCoachingDiagnosticsRoutes($router);
-registerPublicCoachingRoutes($router);
+
+
+// --- Module Trainer ---
+require_once __DIR__ . '/modules/trainer/expertises.php';
+require_once __DIR__ . '/modules/trainer/trainers.php';
+require_once __DIR__ . '/modules/trainer/trainer_applications.php';
+require_once __DIR__ . '/modules/trainer/reference_data.php';
+registerTrainerExpertisesRoutes($router);
+registerTrainerTrainersRoutes($router);
+registerTrainerApplicationsRoutes($router);
+registerTrainerSkillsRoutes($router);
+registerTrainerCitiesRoutes($router);
+registerTrainerCertificationsRoutes($router);
+registerTrainerLanguagesRoutes($router);
+registerTrainerReviewsRoutes($router);
 
 // --- Module Marketing ---
 require_once __DIR__ . '/modules/marketing/newsletter.php';
 require_once __DIR__ . '/modules/marketing/email_logs.php';
+require_once __DIR__ . '/modules/marketing/newsletter_extended.php';
 registerMarketingNewsletterRoutes($router);
 registerMarketingEmailLogsRoutes($router);
+registerMarketingNewsletterExtendedRoutes($router);
 
 // --- Module GDPR ---
 require_once __DIR__ . '/modules/gdpr/consents.php';
@@ -193,13 +210,13 @@ require_once __DIR__ . '/modules/gdpr/deletion_requests.php';
 registerGdprConsentsRoutes($router);
 registerGdprDeletionRequestsRoutes($router);
 
-// --- Module Media ---
-require_once __DIR__ . '/modules/media/media.php';
-registerMediaRoutes($router);
-
 // --- Module SEO ---
 require_once __DIR__ . '/modules/seo/seo.php';
 registerSeoRoutes($router);
+
+// --- Module Media (uploads) ---
+require_once __DIR__ . '/modules/media/media.php';
+registerMediaRoutes($router);
 
 // ===== DISPATCH =====
 try {

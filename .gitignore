@@ -11,6 +11,8 @@ build/
 .env
 .env.local
 api/config/.env
+api/config/env
+api/config/secrets.env
 api/config/config.local.php
 .env.development.local
 .env.test.local
@@ -106,6 +108,11 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+
+# Uploaded media (keep structure only)
+api/uploads/*
+!api/uploads/.gitkeep
+!api/uploads/.htaccess
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/

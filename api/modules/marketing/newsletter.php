@@ -1,6 +1,6 @@
 <?php
 /**
- * modules/marketing/newsletter.php — CRUD marketing_newsletter_subs (v3)
+ * modules/marketing/newsletter.php — CRUD newsletter_subscribers (v2.1)
  */
 
 function registerMarketingNewsletterRoutes(Router $router): void
@@ -13,21 +13,21 @@ function registerMarketingNewsletterRoutes(Router $router): void
         $where = ['site_id = :site_id'];
         $params = [':site_id' => $siteId];
 
-        if (($active = Router::getQueryParam('is_active')) !== null && $active !== '') {
-            $where[] = 'is_active = :is_active';
-            $params[':is_active'] = (int) $active;
+        if ($status = Router::getQueryParam('status')) {
+            $where[] = 'status = :status';
+            $params[':status'] = $status;
         }
 
         $whereClause = 'WHERE ' . implode(' AND ', $where);
 
-        $stmt = $db->prepare("SELECT COUNT(*) as total FROM marketing_newsletter_subs $whereClause");
+        $stmt = $db->prepare("SELECT COUNT(*) as total FROM newsletter_subscribers $whereClause");
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);
         $stmt->execute();
         $total = (int) $stmt->fetch()['total'];
 
         $stmt = $db->prepare(
-            "SELECT id, site_id, email, first_name, is_active, unsub_token, created_at, unsub_at
-             FROM marketing_newsletter_subs
+            "SELECT id, site_id, email, first_name, last_name, status, confirmed_at, unsubscribed_at, created_at
+             FROM newsletter_subscribers
              $whereClause
              ORDER BY created_at DESC
              LIMIT :limit OFFSET :offset"
@@ -52,34 +52,32 @@ function registerMarketingNewsletterRoutes(Router $router): void
             ->validate();
 
         $db = getDb();
-        $stmt = $db->prepare('SELECT id, is_active FROM marketing_newsletter_subs WHERE email = :email AND site_id = :site_id LIMIT 1');
-        $stmt->bindParam(':email', $data['email'], PDO::PARAM_STR);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT id, status FROM newsletter_subscribers WHERE email = :email AND site_id = :site_id LIMIT 1');
+        $stmt->execute([':email' => $data['email'], ':site_id' => $siteId]);
         $existing = $stmt->fetch();
 
         if ($existing) {
-            if ((int) $existing['is_active'] === 1) {
+            if ($existing['status'] === 'active') {
                 Response::success(null, 'Already subscribed');
                 return;
             }
-            $stmtU = $db->prepare('UPDATE marketing_newsletter_subs SET is_active = 1, unsub_at = NULL WHERE id = :id');
-            $stmtU->execute([':id' => $existing['id']]);
+            $db->prepare(
+                "UPDATE newsletter_subscribers SET status = 'active', unsubscribed_at = NULL, rgpd_consent_at = NOW() WHERE id = :id"
+            )->execute([':id' => $existing['id']]);
             Response::success(null, 'Resubscribed successfully');
             return;
         }
 
-        $token = bin2hex(random_bytes(32));
         $stmt = $db->prepare(
-            'INSERT INTO marketing_newsletter_subs (site_id, email, first_name, is_active, unsub_token, created_at)
-             VALUES (:site_id, :email, :fn, 1, :token, NOW())'
+            "INSERT INTO newsletter_subscribers (site_id, email, first_name, last_name, status, rgpd_consent_at, source, created_at)
+             VALUES (:site_id, :email, :fn, :ln, 'active', NOW(), 'form', NOW())"
         );
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->bindParam(':email', $data['email'], PDO::PARAM_STR);
-        $fn = $data['first_name'] ?? null;
-        $stmt->bindParam(':fn', $fn, PDO::PARAM_STR);
-        $stmt->bindParam(':token', $token, PDO::PARAM_STR);
-        $stmt->execute();
+        $stmt->execute([
+            ':site_id' => $siteId,
+            ':email' => $data['email'],
+            ':fn' => $data['first_name'] ?? null,
+            ':ln' => $data['last_name'] ?? null,
+        ]);
 
         Response::created(['id' => (int) $db->lastInsertId()], 'Subscribed successfully');
     });
@@ -92,10 +90,10 @@ function registerMarketingNewsletterRoutes(Router $router): void
         Validator::make($data)->required('email', 'Email')->email('email', 'Email')->validate();
 
         $db = getDb();
-        $stmt = $db->prepare('UPDATE marketing_newsletter_subs SET is_active = 0, unsub_at = NOW() WHERE email = :email AND site_id = :site_id');
-        $stmt->bindParam(':email', $data['email'], PDO::PARAM_STR);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare(
+            "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = NOW() WHERE email = :email AND site_id = :site_id"
+        );
+        $stmt->execute([':email' => $data['email'], ':site_id' => $siteId]);
 
         Response::success(null, 'Unsubscribed successfully');
     });
@@ -106,18 +104,16 @@ function registerMarketingNewsletterRoutes(Router $router): void
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT * FROM marketing_newsletter_subs WHERE id = :id AND site_id = :site_id LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT * FROM newsletter_subscribers WHERE id = :id AND site_id = :site_id LIMIT 1');
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $old = $stmt->fetch();
         if (!$old) { Response::notFound('Subscriber not found'); return; }
 
-        $stmt = $db->prepare('DELETE FROM marketing_newsletter_subs WHERE id = :id');
+        $stmt = $db->prepare('DELETE FROM newsletter_subscribers WHERE id = :id');
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
 
-        Audit::log((int) $admin['id'], $siteId, 'delete', 'marketing_newsletter_sub', $id, $old, null);
+        Audit::log((int) $admin['id'], $siteId, 'delete', 'newsletter_subscriber', $id, $old, null);
         Response::noContent();
     });
 }

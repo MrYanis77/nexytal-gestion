@@ -1,36 +1,41 @@
 <?php
 /**
- * modules/formation/courses.php — CRUD formation_courses
+ * modules/formation/courses.php — CRUD pour la table `formations`
  */
 
 function registerFormationCoursesRoutes(Router $router): void
 {
+    // ===== LISTE =====
     $router->get('/api/admin/formation/courses', function () {
-        $siteId = Middleware::requireSiteIdFromRequest();
+        Middleware::requireRole(['superadmin', 'admin', 'editor']);
         $db = getDb();
         $pagination = Router::getPagination();
         
-        $where = ['c.site_id = :site_id'];
-        $params = [':site_id' => $siteId];
+        $where = ['1=1'];
+        $params = [];
 
         if ($status = Router::getQueryParam('status')) {
-            $where[] = 'c.status = :status';
+            $where[] = 'f.status = :status';
             $params[':status'] = $status;
+        }
+        if ($type = Router::getQueryParam('type')) {
+            $where[] = 'f.type = :type';
+            $params[':type'] = $type;
         }
 
         $whereClause = 'WHERE ' . implode(' AND ', $where);
 
-        $stmt = $db->prepare("SELECT COUNT(*) as total FROM formation_courses c $whereClause");
+        $stmt = $db->prepare("SELECT COUNT(*) as total FROM formations f $whereClause");
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);
         $stmt->execute();
         $total = (int) $stmt->fetch()['total'];
 
         $stmt = $db->prepare(
-            "SELECT c.*, cat.name as category_name 
-             FROM formation_courses c
-             LEFT JOIN formation_categories cat ON c.category_id = cat.id
+            "SELECT f.*, cat.label as category_label 
+             FROM formations f
+             LEFT JOIN formation_categories cat ON f.category_id = cat.id
              $whereClause
-             ORDER BY c.created_at DESC
+             ORDER BY f.created_at DESC
              LIMIT :limit OFFSET :offset"
         );
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);
@@ -38,215 +43,322 @@ function registerFormationCoursesRoutes(Router $router): void
         $stmt->bindValue(':offset', $pagination['offset'], PDO::PARAM_INT);
         $stmt->execute();
         
-        Response::paginated($stmt->fetchAll(), $total, $pagination['page'], $pagination['limit']);
+        $results = $stmt->fetchAll();
+        // Parse JSON
+        foreach ($results as &$r) {
+            $r['modalites_catalogue'] = $r['modalites_catalogue'] ? json_decode($r['modalites_catalogue'], true) : null;
+        }
+
+        Response::paginated($results, $total, $pagination['page'], $pagination['limit']);
     });
 
+    // ===== DÉTAIL =====
     $router->get('/api/admin/formation/courses/{id}', function (array $params) {
-        $siteId = Middleware::requireSiteIdFromRequest();
+        Middleware::requireRole(['superadmin', 'admin', 'editor']);
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare("SELECT c.*, cat.name as category_name FROM formation_courses c LEFT JOIN formation_categories cat ON c.category_id = cat.id WHERE c.id = :id AND c.site_id = :site_id LIMIT 1");
+        $stmt = $db->prepare("SELECT f.*, cat.label as category_label FROM formations f LEFT JOIN formation_categories cat ON f.category_id = cat.id WHERE f.id = :id LIMIT 1");
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
         $stmt->execute();
         $course = $stmt->fetch();
 
-        if (!$course) { Response::notFound('Course not found'); return; }
+        if (!$course) { Response::notFound('Formation not found'); return; }
+        
+        $course['modalites_catalogue'] = $course['modalites_catalogue'] ? json_decode($course['modalites_catalogue'], true) : null;
 
-        $stmtM = $db->prepare("SELECT * FROM formation_modules WHERE course_id = :id ORDER BY sort_order ASC");
+        // Modules
+        $stmtM = $db->prepare("SELECT * FROM formation_modules WHERE formation_id = :id ORDER BY sort_order ASC");
         $stmtM->execute([':id' => $id]);
         $course['modules'] = $stmtM->fetchAll();
 
-        $stmtS = $db->prepare("SELECT * FROM formation_skills WHERE course_id = :id ORDER BY sort_order ASC");
+        // Stats
+        $stmtS = $db->prepare("SELECT * FROM formation_stats WHERE formation_id = :id ORDER BY sort_order ASC");
         $stmtS->execute([':id' => $id]);
-        $course['skills'] = $stmtS->fetchAll();
+        $course['stats'] = $stmtS->fetchAll();
 
-        $stmtJ = $db->prepare("SELECT * FROM formation_jobs WHERE course_id = :id ORDER BY sort_order ASC");
+        // Job outcomes
+        $stmtJ = $db->prepare("SELECT * FROM formation_job_outcomes WHERE formation_id = :id ORDER BY sort_order ASC");
         $stmtJ->execute([':id' => $id]);
-        $course['jobs'] = $stmtJ->fetchAll();
+        $course['job_outcomes'] = $stmtJ->fetchAll();
 
-        $stmtV = $db->prepare("SELECT id, title, status, created_by, created_at FROM formation_courses_versions WHERE course_id = :id ORDER BY created_at DESC");
-        $stmtV->execute([':id' => $id]);
-        $course['versions'] = $stmtV->fetchAll();
+        // List items
+        $stmtL = $db->prepare("SELECT * FROM formation_list_items WHERE formation_id = :id ORDER BY list_type ASC, sort_order ASC");
+        $stmtL->execute([':id' => $id]);
+        $course['list_items'] = $stmtL->fetchAll();
+
+        // Official certifications
+        $stmtC = $db->prepare("SELECT * FROM formation_official_certifications WHERE formation_id = :id LIMIT 1");
+        $stmtC->execute([':id' => $id]);
+        $course['official_certification'] = $stmtC->fetch() ?: null;
 
         Response::success($course);
     });
 
+    // ===== CRÉER =====
     $router->post('/api/admin/formation/courses', function () {
-        $siteId = Middleware::requireSiteIdFromRequest();
         $admin = Middleware::requireRole(['superadmin', 'admin', 'editor']);
         $data = Router::getJsonBody();
 
-        Validator::make($data)->required('title', 'Title')->required('category_id', 'Category')->validate();
-        $slug = $data['slug'] ?? Validator::slugify($data['title']);
+        Validator::make($data)->required('hero_title', 'Hero Title')->required('type', 'Type')->validate();
+        $slug = $data['slug'] ?? Validator::slugify($data['hero_title']);
         $db = getDb();
         $db->beginTransaction();
 
         try {
             $stmt = $db->prepare(
-                'INSERT INTO formation_courses 
-                 (site_id, category_id, title, slug, subtitle, video_url, duration, price, is_cpf_eligible, is_alternance, rncp_repertoire, rncp_code, rncp_title, rncp_level, rncp_url, presentation_title, presentation_text, cta_title, cta_subtitle, meta_title, meta_description, status, created_by, updated_by, created_at)
+                'INSERT INTO formations 
+                 (slug, type, category_id, status, published_at, hero_title, hero_subtitle, hero_video_url, hero_image_url, card_image_url, 
+                  seo_title, seo_description, presentation_title, presentation_content, presentation_image, programme_duration_label, modalites_catalogue, 
+                  methodology, certification_label, evaluation_title, evaluation_description, debouches_title, debouches_subtitle, debouches_sectors, 
+                  info_modalities_title, info_prerequisites_title, cta_title, cta_subtitle, cta_button_label, cta_button_url, cta_secondary_label, cta_secondary_url, 
+                  internal_reference, sort_order, created_by, updated_by, created_at)
                  VALUES 
-                 (:site_id, :cat_id, :title, :slug, :sub, :vid, :dur, :price, :cpf, :alt, :rncp_rep, :rncp_code, :rncp_tit, :rncp_lvl, :rncp_url, :pres_tit, :pres_txt, :cta_tit, :cta_sub, :meta_tit, :meta_desc, :status, :created_by, :updated_by, NOW())'
+                 (:slug, :type, :cat_id, :status, :published_at, :ht, :hs, :hv, :hi, :ci, 
+                  :seot, :seod, :pt, :pc, :pi, :pdl, :mc, 
+                  :meth, :cl, :et, :ed, :dt, :ds, :dsec, 
+                  :imt, :ipt, :ct, :csub, :cbl, :cbu, :csl, :csu, 
+                  :ir, :so, :created_by, :updated_by, NOW())'
             );
-            $stmt->bindValue(':site_id', $siteId, PDO::PARAM_INT);
-            $stmt->bindValue(':cat_id', $data['category_id'], PDO::PARAM_INT);
-            $stmt->bindValue(':title', $data['title'], PDO::PARAM_STR);
             $stmt->bindValue(':slug', $slug, PDO::PARAM_STR);
-            $stmt->bindValue(':sub', $data['subtitle'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':vid', $data['video_url'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':dur', $data['duration'] ?? null, PDO::PARAM_STR);
-            $price = $data['price'] ?? null;
-            $stmt->bindValue(':price', $price, $price === null || $price === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-            $stmt->bindValue(':cpf', isset($data['is_cpf_eligible']) ? (int)$data['is_cpf_eligible'] : 0, PDO::PARAM_INT);
-            $stmt->bindValue(':alt', isset($data['is_alternance']) ? (int)$data['is_alternance'] : 0, PDO::PARAM_INT);
-            $stmt->bindValue(':rncp_rep', $data['rncp_repertoire'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':rncp_code', $data['rncp_code'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':rncp_tit', $data['rncp_title'] ?? null, PDO::PARAM_STR);
-            $rncpLvl = $data['rncp_level'] ?? null;
-            $stmt->bindValue(':rncp_lvl', $rncpLvl, $rncpLvl === null || $rncpLvl === '' ? PDO::PARAM_NULL : PDO::PARAM_INT);
-            $stmt->bindValue(':rncp_url', $data['rncp_url'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':pres_tit', $data['presentation_title'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':pres_txt', $data['presentation_text'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':cta_tit', $data['cta_title'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':cta_sub', $data['cta_subtitle'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':meta_tit', $data['meta_title'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':meta_desc', $data['meta_description'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':status', $data['status'] ?? 'draft', PDO::PARAM_STR);
+            $stmt->bindValue(':type', $data['type'], PDO::PARAM_STR);
+            $stmt->bindValue(':cat_id', $data['category_id'] ?? null, PDO::PARAM_INT);
+            $status = $data['status'] ?? 'draft';
+            $stmt->bindValue(':status', $status, PDO::PARAM_STR);
+            $publishedAt = ($status === 'published') ? date('Y-m-d H:i:s') : ($data['published_at'] ?? null);
+            $stmt->bindValue(':published_at', $publishedAt, PDO::PARAM_STR);
+            
+            $stmt->bindValue(':ht', $data['hero_title'], PDO::PARAM_STR);
+            $stmt->bindValue(':hs', $data['hero_subtitle'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':hv', $data['hero_video_url'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':hi', $data['hero_image_url'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':ci', $data['card_image_url'] ?? null, PDO::PARAM_STR);
+            
+            $stmt->bindValue(':seot', $data['seo_title'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':seod', $data['seo_description'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':pt', $data['presentation_title'] ?? 'Le métier', PDO::PARAM_STR);
+            $stmt->bindValue(':pc', $data['presentation_content'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':pi', $data['presentation_image'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':pdl', $data['programme_duration_label'] ?? null, PDO::PARAM_STR);
+            
+            $mc = isset($data['modalites_catalogue']) ? json_encode($data['modalites_catalogue']) : null;
+            $stmt->bindValue(':mc', $mc, PDO::PARAM_STR);
+            
+            $stmt->bindValue(':meth', $data['methodology'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':cl', $data['certification_label'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':et', $data['evaluation_title'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':ed', $data['evaluation_description'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':dt', $data['debouches_title'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':ds', $data['debouches_subtitle'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':dsec', $data['debouches_sectors'] ?? null, PDO::PARAM_STR);
+            
+            $stmt->bindValue(':imt', $data['info_modalities_title'] ?? 'Modalités pratiques', PDO::PARAM_STR);
+            $stmt->bindValue(':ipt', $data['info_prerequisites_title'] ?? 'Prérequis', PDO::PARAM_STR);
+            $stmt->bindValue(':ct', $data['cta_title'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':csub', $data['cta_subtitle'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':cbl', $data['cta_button_label'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':cbu', $data['cta_button_url'] ?? '/contact', PDO::PARAM_STR);
+            $stmt->bindValue(':csl', $data['cta_secondary_label'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':csu', $data['cta_secondary_url'] ?? null, PDO::PARAM_STR);
+            
+            $stmt->bindValue(':ir', $data['internal_reference'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':so', $data['sort_order'] ?? 0, PDO::PARAM_INT);
             $stmt->bindValue(':created_by', $admin['id'], PDO::PARAM_INT);
             $stmt->bindValue(':updated_by', $admin['id'], PDO::PARAM_INT);
             $stmt->execute();
             
-            $courseId = (int) $db->lastInsertId();
+            $formationId = (int) $db->lastInsertId();
 
-            if (!empty($data['modules']) && is_array($data['modules'])) {
-                $stmtM = $db->prepare('INSERT INTO formation_modules (course_id, title, description, duration, sort_order) VALUES (:cid, :tit, :desc, :dur, :sort)');
+            if (isset($data['modules']) && is_array($data['modules'])) {
+                $stmtM = $db->prepare('INSERT INTO formation_modules (formation_id, title, duration_label, description, sort_order) VALUES (:cid, :tit, :dur, :desc, :sort)');
                 foreach ($data['modules'] as $idx => $m) {
-                    $stmtM->execute([':cid' => $courseId, ':tit' => $m['title'], ':desc' => $m['description'] ?? null, ':dur' => $m['duration'] ?? null, ':sort' => $m['sort_order'] ?? $idx]);
+                    $stmtM->execute([
+                        ':cid' => $formationId,
+                        ':tit' => $m['title'],
+                        ':dur' => $m['duration_label'] ?? null,
+                        ':desc' => $m['description'] ?? null,
+                        ':sort' => $m['sort_order'] ?? $idx,
+                    ]);
                 }
             }
-            if (!empty($data['skills']) && is_array($data['skills'])) {
-                $stmtS = $db->prepare('INSERT INTO formation_skills (course_id, name, sort_order) VALUES (:cid, :name, :sort)');
-                foreach ($data['skills'] as $idx => $s) {
-                    $stmtS->execute([':cid' => $courseId, ':name' => $s['name'], ':sort' => $s['sort_order'] ?? $idx]);
+
+            if (isset($data['stats']) && is_array($data['stats'])) {
+                $stmtS = $db->prepare('INSERT INTO formation_stats (formation_id, label, value, icon, sort_order) VALUES (:cid, :label, :value, :icon, :sort)');
+                foreach ($data['stats'] as $idx => $s) {
+                    $stmtS->execute([
+                        ':cid' => $formationId,
+                        ':label' => $s['label'],
+                        ':value' => $s['value'],
+                        ':icon' => $s['icon'] ?? null,
+                        ':sort' => $s['sort_order'] ?? $idx,
+                    ]);
                 }
             }
-            if (!empty($data['jobs']) && is_array($data['jobs'])) {
-                $stmtJ = $db->prepare('INSERT INTO formation_jobs (course_id, title, salary_min, salary_max, sort_order) VALUES (:cid, :tit, :min, :max, :sort)');
-                foreach ($data['jobs'] as $idx => $j) {
-                    $salMin = $j['salary_min'] ?? null;
-                    $salMax = $j['salary_max'] ?? null;
-                    $stmtJ->bindValue(':cid', $courseId, PDO::PARAM_INT);
-                    $stmtJ->bindValue(':tit', $j['title'], PDO::PARAM_STR);
-                    $stmtJ->bindValue(':min', $salMin, $salMin === null || $salMin === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                    $stmtJ->bindValue(':max', $salMax, $salMax === null || $salMax === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                    $stmtJ->bindValue(':sort', $j['sort_order'] ?? $idx, PDO::PARAM_INT);
-                    $stmtJ->execute();
+
+            if (isset($data['job_outcomes']) && is_array($data['job_outcomes'])) {
+                $stmtJ = $db->prepare('INSERT INTO formation_job_outcomes (formation_id, job_title, salary_label, sort_order) VALUES (:cid, :tit, :sal, :sort)');
+                foreach ($data['job_outcomes'] as $idx => $j) {
+                    $stmtJ->execute([
+                        ':cid' => $formationId,
+                        ':tit' => $j['job_title'],
+                        ':sal' => $j['salary_label'] ?? null,
+                        ':sort' => $j['sort_order'] ?? $idx,
+                    ]);
                 }
+            }
+
+            if (isset($data['list_items']) && is_array($data['list_items'])) {
+                $stmtL = $db->prepare('INSERT INTO formation_list_items (formation_id, list_type, content, sort_order) VALUES (:cid, :type, :content, :sort)');
+                foreach ($data['list_items'] as $idx => $item) {
+                    $stmtL->execute([
+                        ':cid' => $formationId,
+                        ':type' => $item['list_type'],
+                        ':content' => $item['content'],
+                        ':sort' => $item['sort_order'] ?? $idx,
+                    ]);
+                }
+            }
+
+            if (!empty($data['official_certification'])) {
+                $oc = $data['official_certification'];
+                $stmtC = $db->prepare('INSERT INTO formation_official_certifications (formation_id, repertoire, code, official_title, level, france_competences_url, show_on_certification_page) VALUES (:cid, :rep, :code, :tit, :lvl, :url, :show)');
+                $stmtC->execute([
+                    ':cid' => $formationId,
+                    ':rep' => $oc['repertoire'] ?? 'RNCP',
+                    ':code' => $oc['code'],
+                    ':tit' => $oc['official_title'],
+                    ':lvl' => $oc['level'] ?? null,
+                    ':url' => $oc['france_competences_url'],
+                    ':show' => $oc['show_on_certification_page'] ?? 1,
+                ]);
             }
 
             $db->commit();
-            Audit::log((int) $admin['id'], $siteId, 'create', 'formation_course', $courseId, null, $data);
-            Response::created(['id' => $courseId]);
+            Audit::log((int) $admin['id'], 1, 'create', 'formation', $formationId, null, $data);
+            Response::created(['id' => $formationId]);
 
         } catch (\Exception $e) {
             $db->rollBack();
-            Response::serverError('Failed to create course', $e->getMessage());
+            Response::serverError('Failed to create formation', $e->getMessage());
         }
     });
 
+    // ===== MODIFIER =====
     $router->put('/api/admin/formation/courses/{id}', function (array $params) {
-        $siteId = Middleware::requireSiteIdFromRequest();
         $admin = Middleware::requireRole(['superadmin', 'admin', 'editor']);
         $data = Router::getJsonBody();
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT * FROM formation_courses WHERE id = :id AND site_id = :site_id LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT * FROM formations WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $id]);
         $old = $stmt->fetch();
-        if (!$old) { Response::notFound('Course not found'); return; }
+        if (!$old) { Response::notFound('Formation not found'); return; }
 
         $db->beginTransaction();
         try {
-            $stmtV = $db->prepare('INSERT INTO formation_courses_versions (course_id, title, presentation_text, status, created_by, created_at) VALUES (:cid, :tit, :txt, :st, :uid, NOW())');
-            $stmtV->execute([':cid' => $id, ':tit' => $old['title'], ':txt' => $old['presentation_text'], ':st' => $old['status'], ':uid' => $admin['id']]);
-
             $fields = []; $bind = [];
-            $updatable = ['category_id', 'title', 'slug', 'subtitle', 'video_url', 'duration', 'price', 'is_cpf_eligible', 'is_alternance', 'rncp_repertoire', 'rncp_code', 'rncp_title', 'rncp_level', 'rncp_url', 'presentation_title', 'presentation_text', 'cta_title', 'cta_subtitle', 'meta_title', 'meta_description', 'status'];
+            $updatable = [
+                'slug', 'type', 'category_id', 'status', 'published_at', 'hero_title', 'hero_subtitle', 'hero_video_url', 'hero_image_url', 'card_image_url', 
+                'seo_title', 'seo_description', 'presentation_title', 'presentation_content', 'presentation_image', 'programme_duration_label', 
+                'methodology', 'certification_label', 'evaluation_title', 'evaluation_description', 'debouches_title', 'debouches_subtitle', 'debouches_sectors', 
+                'info_modalities_title', 'info_prerequisites_title', 'cta_title', 'cta_subtitle', 'cta_button_label', 'cta_button_url', 'cta_secondary_label', 'cta_secondary_url', 
+                'internal_reference', 'sort_order'
+            ];
+            
             foreach ($updatable as $f) {
                 if (array_key_exists($f, $data)) { $fields[] = "$f = :$f"; $bind[":$f"] = $data[$f]; }
+            }
+            
+            if (array_key_exists('modalites_catalogue', $data)) {
+                $fields[] = "modalites_catalogue = :mc";
+                $bind[':mc'] = is_array($data['modalites_catalogue']) ? json_encode($data['modalites_catalogue']) : $data['modalites_catalogue'];
             }
 
             if (!empty($fields)) {
                 $fields[] = "updated_by = :uid"; $bind[':uid'] = $admin['id'];
                 $fields[] = "updated_at = NOW()";
-                $sql = 'UPDATE formation_courses SET ' . implode(', ', $fields) . ' WHERE id = :id';
+                $sql = 'UPDATE formations SET ' . implode(', ', $fields) . ' WHERE id = :id';
                 $stmtU = $db->prepare($sql);
                 foreach ($bind as $k => $v) $stmtU->bindValue($k, $v);
                 $stmtU->bindParam(':id', $id, PDO::PARAM_INT);
                 $stmtU->execute();
             }
 
+            // Child updates (simplifiés : on supprime et recrée pour les arrays)
             if (isset($data['modules']) && is_array($data['modules'])) {
-                $db->prepare("DELETE FROM formation_modules WHERE course_id = :id")->execute([':id' => $id]);
-                $stmtM = $db->prepare('INSERT INTO formation_modules (course_id, title, description, duration, sort_order) VALUES (:cid, :tit, :desc, :dur, :sort)');
+                $db->prepare("DELETE FROM formation_modules WHERE formation_id = :id")->execute([':id' => $id]);
+                $stmtM = $db->prepare('INSERT INTO formation_modules (formation_id, title, duration_label, description, sort_order) VALUES (:cid, :tit, :dur, :desc, :sort)');
                 foreach ($data['modules'] as $idx => $m) {
-                    $stmtM->execute([':cid' => $id, ':tit' => $m['title'], ':desc' => $m['description'] ?? null, ':dur' => $m['duration'] ?? null, ':sort' => $m['sort_order'] ?? $idx]);
+                    $stmtM->execute([':cid' => $id, ':tit' => $m['title'], ':dur' => $m['duration_label'] ?? null, ':desc' => $m['description'] ?? null, ':sort' => $m['sort_order'] ?? $idx]);
                 }
             }
-            if (isset($data['skills']) && is_array($data['skills'])) {
-                $db->prepare("DELETE FROM formation_skills WHERE course_id = :id")->execute([':id' => $id]);
-                $stmtS = $db->prepare('INSERT INTO formation_skills (course_id, name, sort_order) VALUES (:cid, :name, :sort)');
-                foreach ($data['skills'] as $idx => $s) {
-                    $stmtS->execute([':cid' => $id, ':name' => $s['name'], ':sort' => $s['sort_order'] ?? $idx]);
+
+            if (isset($data['stats']) && is_array($data['stats'])) {
+                $db->prepare("DELETE FROM formation_stats WHERE formation_id = :id")->execute([':id' => $id]);
+                $stmtS = $db->prepare('INSERT INTO formation_stats (formation_id, label, value, icon, sort_order) VALUES (:cid, :label, :value, :icon, :sort)');
+                foreach ($data['stats'] as $idx => $s) {
+                    $stmtS->execute([':cid' => $id, ':label' => $s['label'], ':value' => $s['value'], ':icon' => $s['icon'] ?? null, ':sort' => $s['sort_order'] ?? $idx]);
                 }
             }
-            if (isset($data['jobs']) && is_array($data['jobs'])) {
-                $db->prepare("DELETE FROM formation_jobs WHERE course_id = :id")->execute([':id' => $id]);
-                $stmtJ = $db->prepare('INSERT INTO formation_jobs (course_id, title, salary_min, salary_max, sort_order) VALUES (:cid, :tit, :min, :max, :sort)');
-                foreach ($data['jobs'] as $idx => $j) {
-                    $salMin = $j['salary_min'] ?? null;
-                    $salMax = $j['salary_max'] ?? null;
-                    $stmtJ->bindValue(':cid', $id, PDO::PARAM_INT);
-                    $stmtJ->bindValue(':tit', $j['title'], PDO::PARAM_STR);
-                    $stmtJ->bindValue(':min', $salMin, $salMin === null || $salMin === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                    $stmtJ->bindValue(':max', $salMax, $salMax === null || $salMax === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                    $stmtJ->bindValue(':sort', $j['sort_order'] ?? $idx, PDO::PARAM_INT);
-                    $stmtJ->execute();
+            
+            if (isset($data['job_outcomes']) && is_array($data['job_outcomes'])) {
+                $db->prepare("DELETE FROM formation_job_outcomes WHERE formation_id = :id")->execute([':id' => $id]);
+                $stmtS = $db->prepare('INSERT INTO formation_job_outcomes (formation_id, job_title, salary_label, sort_order) VALUES (:cid, :tit, :sal, :sort)');
+                foreach ($data['job_outcomes'] as $idx => $s) {
+                    $stmtS->execute([':cid' => $id, ':tit' => $s['job_title'], ':sal' => $s['salary_label'] ?? null, ':sort' => $s['sort_order'] ?? $idx]);
+                }
+            }
+            
+            if (isset($data['list_items']) && is_array($data['list_items'])) {
+                $db->prepare("DELETE FROM formation_list_items WHERE formation_id = :id")->execute([':id' => $id]);
+                $stmtS = $db->prepare('INSERT INTO formation_list_items (formation_id, list_type, content, sort_order) VALUES (:cid, :type, :content, :sort)');
+                foreach ($data['list_items'] as $idx => $s) {
+                    $stmtS->execute([':cid' => $id, ':type' => $s['list_type'], ':content' => $s['content'], ':sort' => $s['sort_order'] ?? $idx]);
+                }
+            }
+
+            if (isset($data['official_certification'])) {
+                $db->prepare("DELETE FROM formation_official_certifications WHERE formation_id = :id")->execute([':id' => $id]);
+                if (!empty($data['official_certification'])) {
+                    $oc = $data['official_certification'];
+                    $stmtC = $db->prepare('INSERT INTO formation_official_certifications (formation_id, repertoire, code, official_title, level, france_competences_url, show_on_certification_page) VALUES (:cid, :rep, :code, :tit, :lvl, :url, :show)');
+                    $stmtC->execute([
+                        ':cid' => $id,
+                        ':rep' => $oc['repertoire'] ?? 'RNCP',
+                        ':code' => $oc['code'],
+                        ':tit' => $oc['official_title'],
+                        ':lvl' => $oc['level'] ?? null,
+                        ':url' => $oc['france_competences_url'],
+                        ':show' => $oc['show_on_certification_page'] ?? 1
+                    ]);
                 }
             }
 
             $db->commit();
-            Audit::log((int) $admin['id'], $siteId, 'update', 'formation_course', $id, $old, $data);
-            Response::success(['id' => $id], 'Course updated');
+            Audit::log((int) $admin['id'], 1, 'update', 'formation', $id, $old, $data);
+            Response::success(['id' => $id], 'Formation updated');
 
         } catch (\Exception $e) {
             $db->rollBack();
-            Response::serverError('Failed to update course', $e->getMessage());
+            Response::serverError('Failed to update formation', $e->getMessage());
         }
     });
 
+    // ===== SUPPRIMER =====
     $router->delete('/api/admin/formation/courses/{id}', function (array $params) {
-        $siteId = Middleware::requireSiteIdFromRequest();
         $admin = Middleware::requireRole(['superadmin', 'admin']);
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT id FROM formation_courses WHERE id = :id AND site_id = :site_id LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT id FROM formations WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $id]);
         $old = $stmt->fetch();
-        if (!$old) { Response::notFound('Course not found'); return; }
+        if (!$old) { Response::notFound('Formation not found'); return; }
 
-        $stmt = $db->prepare('DELETE FROM formation_courses WHERE id = :id');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->execute();
-        Audit::log((int) $admin['id'], $siteId, 'delete', 'formation_course', $id, $old, null);
+        $stmt = $db->prepare('DELETE FROM formations WHERE id = :id');
+        $stmt->execute([':id' => $id]);
+        Audit::log((int) $admin['id'], 1, 'delete', 'formation', $id, $old, null);
         Response::noContent();
     });
 }

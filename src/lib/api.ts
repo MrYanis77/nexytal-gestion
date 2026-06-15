@@ -34,12 +34,7 @@ api.interceptors.request.use((config) => {
   else if (siteId === 'trainer' || siteId === 'nexytal-trainer') siteId = '5';
   else if (siteId === 'coaching' || siteId === 'nexytal-coaching') siteId = '6';
 
-  if (!siteId && config.url) {
-    if (config.url.includes('/formation/')) siteId = '1';
-    else if (config.url.includes('/recrutement/')) siteId = '2';
-    else if (config.url.includes('/coaching/')) siteId = '6';
-  }
-
+  // Page courante en priorité : medical/trainer partagent des routes /recrutement/…
   if (!siteId && typeof window !== 'undefined') {
     const path = window.location.pathname;
     if (path.includes('/formation')) siteId = '1';
@@ -48,6 +43,13 @@ api.interceptors.request.use((config) => {
     else if (path.includes('/carriere')) siteId = '4';
     else if (path.includes('/trainer')) siteId = '5';
     else if (path.includes('/coaching')) siteId = '6';
+  }
+
+  if (!siteId && config.url) {
+    if (config.url.includes('/formation/')) siteId = '1';
+    else if (config.url.includes('/recrutement/')) siteId = '2';
+    else if (config.url.includes('/coaching/')) siteId = '6';
+    else if (config.url.includes('/trainer/')) siteId = '5';
   }
 
   if (siteId) {

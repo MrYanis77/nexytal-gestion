@@ -1,13 +1,11 @@
 <?php
 /**
- * Copiez ce fichier en config.local.php sur le FTP (prioritaire sur .env).
+ * Copiez en config.local.php sur le FTP si les fichiers env/.env ne sont pas lus.
  * Ionos → Bases de données → dbs15772578 → Détails
- *
- * Plus fiable que .env sur FTP (les fichiers cachés sont souvent ignorés).
  */
 
 define('DB_HOST', 'db5020658636.hosting-data.io');
 define('DB_PORT', 3306);
 define('DB_NAME', 'dbs15772578');
 define('DB_USER', 'dbu977482');
-// Ne pas mettre le mot de passe ici — utilisez api/config/.env → DB_PASSWORD
+define('DB_PASS', 'remplacer_par_mot_de_passe_ionos');

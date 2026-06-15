@@ -45,7 +45,7 @@ function getDb(): PDO
             echo json_encode([
                 'success' => false,
                 'error'   => 'Database connection failed',
-                'hint'    => 'Vérifiez DB_PASSWORD dans api/config/.env (Ionos → réinitialiser le mot de passe dbu977482)',
+                'hint'    => 'Créez api/config/env (ou .env) sur le FTP avec DB_PASSWORD=… — voir api/config/env.example',
                 'data'    => $test,
             ]);
             exit;
@@ -84,9 +84,11 @@ function testDbConnection(): array
         'env_file'              => $GLOBALS['_env_loaded_files'] ?? [],
         'config_local'          => is_readable(__DIR__ . '/config.local.php'),
         'env_password_set'      => $envPassword !== '',
-        'password_source'       => $envPassword !== '' ? 'env' : (defined('DB_PASS') ? 'config.local_or_default' : 'missing'),
+        'password_source'       => $envPassword !== ''
+            ? 'env'
+            : (defined('DB_PASS') && DB_PASS !== '' ? 'config.local.php' : 'missing'),
         'password_length'       => strlen($dbPassword),
-        'config_local_db_pass'  => defined('DB_PASS') && $envPassword === '',
+        'config_local_db_pass'  => defined('DB_PASS') && DB_PASS !== '' && $envPassword === '',
     ];
 
     try {
@@ -129,7 +131,7 @@ function getSiteId(string $slug): ?int
     }
 
     $db = getDb();
-    $stmt = $db->prepare('SELECT id FROM core_sites WHERE slug = :slug AND is_active = 1 LIMIT 1');
+    $stmt = $db->prepare('SELECT id FROM core_sites WHERE slug = :slug LIMIT 1');
     $stmt->bindParam(':slug', $slug, PDO::PARAM_STR);
     $stmt->execute();
     $row = $stmt->fetch();
@@ -157,7 +159,7 @@ function getSiteIdFromDomain(string $domain): ?int
     }
 
     $db = getDb();
-    $stmt = $db->prepare('SELECT id FROM core_sites WHERE domain = :domain AND is_active = 1 LIMIT 1');
+    $stmt = $db->prepare('SELECT id FROM core_sites WHERE domain = :domain LIMIT 1');
     $stmt->bindParam(':domain', $domain, PDO::PARAM_STR);
     $stmt->execute();
     $row = $stmt->fetch();
@@ -176,6 +178,6 @@ function getSiteIdFromDomain(string $domain): ?int
 function getAllSites(): array
 {
     $db = getDb();
-    $stmt = $db->query('SELECT id, name, slug, domain FROM core_sites WHERE is_active = 1 ORDER BY id');
+    $stmt = $db->query('SELECT id, name, slug, domain FROM core_sites ORDER BY id');
     return $stmt->fetchAll();
 }

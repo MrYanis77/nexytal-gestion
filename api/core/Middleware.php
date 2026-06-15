@@ -54,18 +54,10 @@ class Middleware
             exit;
         }
 
-        // Vérifier que la session existe toujours
+        // Vérifier que la session existe toujours (token ou id selon schéma BDD)
         if (isset($payload['session_id'])) {
-            $stmt = $db->prepare(
-                'SELECT id FROM core_admin_sessions 
-                 WHERE id = :id AND admin_id = :admin_id AND expires_at > NOW() 
-                 LIMIT 1'
-            );
-            $stmt->bindParam(':id', $payload['session_id'], PDO::PARAM_INT);
-            $stmt->bindParam(':admin_id', $admin['id'], PDO::PARAM_INT);
-            $stmt->execute();
-
-            if (!$stmt->fetch()) {
+            $sessionToken = (string) $payload['session_id'];
+            if (!AdminSession::isValid($db, $sessionToken, (int) $admin['id'])) {
                 Response::unauthorized('Session expired or revoked');
                 exit;
             }

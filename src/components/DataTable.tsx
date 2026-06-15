@@ -181,6 +181,7 @@ export function StatusBadge({ statut }: { statut: string }) {
     actif: { label: 'Actif', class: 'bg-green-500/15 text-green-400' },
     active: { label: 'Actif', class: 'bg-green-500/15 text-green-400' },
     inactif: { label: 'Inactif', class: 'bg-red-500/15 text-red-400' },
+    en_attente: { label: 'En attente', class: 'bg-yellow-500/15 text-yellow-400' },
     inactive: { label: 'Inactif', class: 'bg-red-500/15 text-red-400' },
     pending: { label: 'En attente', class: 'bg-yellow-500/15 text-yellow-400' },
     confirmed: { label: 'Confirmée', class: 'bg-blue-500/15 text-blue-400' },
@@ -189,6 +190,12 @@ export function StatusBadge({ statut }: { statut: string }) {
     disponible: { label: 'Disponible', class: 'bg-green-500/15 text-green-400' },
     reserve: { label: 'Réservé', class: 'bg-blue-500/15 text-blue-400' },
     annule: { label: 'Annulé', class: 'bg-red-500/15 text-red-400' },
+    pending_review: { label: 'En attente', class: 'bg-yellow-500/15 text-yellow-400' },
+    new: { label: 'Nouvelle', class: 'bg-blue-500/15 text-blue-400' },
+    in_review: { label: 'En revue', class: 'bg-yellow-500/15 text-yellow-400' },
+    interview: { label: 'Entretien', class: 'bg-blue-500/15 text-blue-400' },
+    approved: { label: 'Approuvée', class: 'bg-green-500/15 text-green-400' },
+    rejected: { label: 'Refusée', class: 'bg-red-500/15 text-red-400' },
   };
   const s = map[statut] ?? { label: statut, class: 'bg-secondary text-muted-foreground' };
   return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${s.class}`}>{s.label}</span>;

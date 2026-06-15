@@ -1,6 +1,6 @@
 <?php
 /**
- * modules/recrutement/applications.php — CRUD recrutement_applications
+ * modules/recrutement/applications.php — CRUD candidatures (v2.1)
  */
 
 function registerRecrutementApplicationsRoutes(Router $router): void
@@ -9,40 +9,40 @@ function registerRecrutementApplicationsRoutes(Router $router): void
         $siteId = Middleware::requireSiteIdFromRequest();
         $db = getDb();
         $pagination = Router::getPagination();
-        
-        $where = ['o.site_id = :site_id', 'a.deleted_at IS NULL'];
+
+        $where = ['o.site_id = :site_id'];
         $params = [':site_id' => $siteId];
 
-        if ($offerId = Router::getQueryParam('offer_id')) {
-            $where[] = 'a.offer_id = :offer_id';
-            $params[':offer_id'] = (int) $offerId;
-        }
-
-        if ($status = Router::getQueryParam('status')) {
-            $where[] = 'a.status = :status';
-            $params[':status'] = $status;
+        if ($status = Router::getQueryParam('statut')) {
+            $where[] = 'c.statut = :statut';
+            $params[':statut'] = $status;
         }
 
         $whereClause = 'WHERE ' . implode(' AND ', $where);
 
-        $stmt = $db->prepare("SELECT COUNT(*) as total FROM recrutement_applications a JOIN recrutement_offers o ON a.offer_id = o.id $whereClause");
+        $stmt = $db->prepare(
+            "SELECT COUNT(*) as total FROM candidatures c
+             INNER JOIN offres_emploi o ON c.offre_id = o.id $whereClause"
+        );
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);
         $stmt->execute();
         $total = (int) $stmt->fetch()['total'];
 
         $stmt = $db->prepare(
-            "SELECT a.*, o.title as offer_title 
-             FROM recrutement_applications a
-             JOIN recrutement_offers o ON a.offer_id = o.id
+            "SELECT c.*, o.titre as offre_titre, cand.prenom as candidat_prenom, cand.nom as candidat_nom, u.email as candidat_email
+             FROM candidatures c
+             INNER JOIN offres_emploi o ON c.offre_id = o.id
+             INNER JOIN candidats cand ON c.candidat_id = cand.id
+             INNER JOIN users u ON cand.user_id = u.id
              $whereClause
-             ORDER BY a.created_at DESC
+             ORDER BY c.date_candidature DESC
              LIMIT :limit OFFSET :offset"
         );
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);
         $stmt->bindValue(':limit', $pagination['limit'], PDO::PARAM_INT);
         $stmt->bindValue(':offset', $pagination['offset'], PDO::PARAM_INT);
         $stmt->execute();
-        
+
         Response::paginated($stmt->fetchAll(), $total, $pagination['page'], $pagination['limit']);
     });
 
@@ -52,24 +52,56 @@ function registerRecrutementApplicationsRoutes(Router $router): void
         $id = (int) $params['id'];
 
         $stmt = $db->prepare(
-            "SELECT a.*, o.title as offer_title 
-             FROM recrutement_applications a
-             JOIN recrutement_offers o ON a.offer_id = o.id
-             WHERE a.id = :id AND o.site_id = :site_id AND a.deleted_at IS NULL LIMIT 1"
+            'SELECT c.*, o.titre as offre_titre, cand.prenom as candidat_prenom, cand.nom as candidat_nom, u.email as candidat_email
+             FROM candidatures c
+             INNER JOIN offres_emploi o ON c.offre_id = o.id
+             INNER JOIN candidats cand ON c.candidat_id = cand.id
+             INNER JOIN users u ON cand.user_id = u.id
+             WHERE c.id = :id AND o.site_id = :site_id LIMIT 1'
         );
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $app = $stmt->fetch();
+        if (!$app) { Response::notFound('Candidature not found'); return; }
 
-        if (!$app) { Response::notFound('Application not found'); return; }
-
-        $stmtHist = $db->prepare('SELECT h.*, u.first_name, u.last_name FROM recrutement_application_history h LEFT JOIN core_admin_users u ON h.changed_by_id = u.id WHERE h.application_id = :id ORDER BY h.created_at DESC');
-        $stmtHist->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmtHist->execute();
-        $app['history'] = $stmtHist->fetchAll();
+        $stmtH = $db->prepare(
+            'SELECT ch.*, au.email as auteur_admin_email
+             FROM candidature_historique ch
+             LEFT JOIN core_admin_users au ON ch.auteur_admin_id = au.id
+             WHERE ch.candidature_id = :id ORDER BY ch.created_at DESC'
+        );
+        $stmtH->execute([':id' => $id]);
+        $app['historique'] = $stmtH->fetchAll();
 
         Response::success($app);
+    });
+
+    $router->post('/api/admin/recrutement/applications', function () {
+        $siteId = Middleware::requireSiteIdFromRequest();
+        $admin = Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
+        $data = Router::getJsonBody();
+        Validator::make($data)->required('offre_id', 'Offre')->required('candidat_id', 'Candidat')->validate();
+
+        $db = getDb();
+        $stmt = $db->prepare('SELECT id FROM offres_emploi WHERE id = :id AND site_id = :site_id LIMIT 1');
+        $stmt->execute([':id' => $data['offre_id'], ':site_id' => $siteId]);
+        if (!$stmt->fetch()) { Response::badRequest('Invalid offer for this site'); return; }
+
+        try {
+            $stmt = $db->prepare(
+                'INSERT INTO candidatures (offre_id, candidat_id, message_motivation, notes_recruteur, statut, source, date_candidature, updated_at)
+                 VALUES (:oid, :cid, :msg, :notes, :st, :src, NOW(), NOW())'
+            );
+            $stmt->execute([
+                ':oid' => $data['offre_id'], ':cid' => $data['candidat_id'],
+                ':msg' => $data['message_motivation'] ?? null, ':notes' => $data['notes_recruteur'] ?? null,
+                ':st' => $data['statut'] ?? 'recue', ':src' => $data['source'] ?? 'site',
+            ]);
+            $newId = (int) $db->lastInsertId();
+            Audit::log((int) $admin['id'], $siteId, 'create', 'candidature', $newId, null, $data);
+            Response::created(['id' => $newId]);
+        } catch (\PDOException $e) {
+            Response::badRequest('Candidature already exists for this offer/candidat');
+        }
     });
 
     $router->put('/api/admin/recrutement/applications/{id}', function (array $params) {
@@ -79,78 +111,70 @@ function registerRecrutementApplicationsRoutes(Router $router): void
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT a.* FROM recrutement_applications a JOIN recrutement_offers o ON a.offer_id = o.id WHERE a.id = :id AND o.site_id = :site_id AND a.deleted_at IS NULL LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare(
+            'SELECT c.* FROM candidatures c
+             INNER JOIN offres_emploi o ON c.offre_id = o.id
+             WHERE c.id = :id AND o.site_id = :site_id LIMIT 1'
+        );
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $old = $stmt->fetch();
+        if (!$old) { Response::notFound('Candidature not found'); return; }
 
-        if (!$old) { Response::notFound('Application not found'); return; }
-
-        $fields = []; $bind = [];
-        $statusChanged = false;
-        
-        if (isset($data['status']) && $data['status'] !== $old['status']) {
-            $fields[] = 'status = :status';
-            $bind[':status'] = $data['status'];
-            $statusChanged = true;
+        $fields = [];
+        $bind = [];
+        foreach (['statut', 'message_motivation', 'notes_recruteur'] as $f) {
+            if (array_key_exists($f, $data)) {
+                $fields[] = "$f = :$f";
+                $bind[":$f"] = $data[$f];
+            }
         }
-
-        if (array_key_exists('internal_notes', $data)) {
-            $fields[] = 'internal_notes = :internal_notes';
-            $bind[':internal_notes'] = $data['internal_notes'];
-        }
-
         if (empty($fields)) { Response::badRequest('No fields to update'); return; }
 
-        $fields[] = "updated_at = NOW()";
-        
-        $db->beginTransaction();
-        try {
-            $sql = 'UPDATE recrutement_applications SET ' . implode(', ', $fields) . ' WHERE id = :id';
-            $stmt = $db->prepare($sql);
-            foreach ($bind as $k => $v) $stmt->bindValue($k, $v);
-            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-            $stmt->execute();
+        $fields[] = 'updated_at = NOW()';
+        $sql = 'UPDATE candidatures SET ' . implode(', ', $fields) . ' WHERE id = :id';
+        $stmtU = $db->prepare($sql);
+        foreach ($bind as $k => $v) $stmtU->bindValue($k, $v);
+        $stmtU->bindParam(':id', $id, PDO::PARAM_INT);
+        $stmtU->execute();
 
-            if ($statusChanged) {
-                $stmtHist = $db->prepare('INSERT INTO recrutement_application_history (application_id, old_status, new_status, changed_by_id, note, created_at) VALUES (:app_id, :old, :new, :admin_id, :note, NOW())');
-                $stmtHist->bindValue(':app_id', $id, PDO::PARAM_INT);
-                $stmtHist->bindValue(':old', $old['status'], PDO::PARAM_STR);
-                $stmtHist->bindValue(':new', $data['status'], PDO::PARAM_STR);
-                $stmtHist->bindValue(':admin_id', $admin['id'], PDO::PARAM_INT);
-                $note = $data['history_note'] ?? null;
-                $stmtHist->bindValue(':note', $note, PDO::PARAM_STR);
-                $stmtHist->execute();
-            }
-            $db->commit();
-
-            Audit::log((int) $admin['id'], $siteId, 'update', 'recrutement_application', $id, $old, $data);
-            Response::success(['id' => $id], 'Application updated');
-        } catch (\Exception $e) {
-            $db->rollBack();
-            Response::serverError('Failed to update application', $e->getMessage());
+        if (isset($data['statut']) && $data['statut'] !== $old['statut']) {
+            $stmtH = $db->prepare(
+                'INSERT INTO candidature_historique (candidature_id, ancien_statut, nouveau_statut, commentaire, auteur_admin_id, created_at)
+                 VALUES (:cid, :as, :ns, :com, :aid, NOW())'
+            );
+            $stmtH->execute([
+                ':cid' => $id,
+                ':as' => $old['statut'],
+                ':ns' => $data['statut'],
+                ':com' => $data['commentaire'] ?? 'Statut mis à jour',
+                ':aid' => $admin['id'],
+            ]);
         }
+
+        Audit::log((int) $admin['id'], $siteId, 'update', 'candidature', $id, $old, $data);
+        Response::success(['id' => $id], 'Candidature updated');
     });
 
     $router->delete('/api/admin/recrutement/applications/{id}', function (array $params) {
         $siteId = Middleware::requireSiteIdFromRequest();
-        $admin = Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
+        $admin = Middleware::requireRole(['superadmin', 'admin']);
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT a.id FROM recrutement_applications a JOIN recrutement_offers o ON a.offer_id = o.id WHERE a.id = :id AND o.site_id = :site_id AND a.deleted_at IS NULL LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare(
+            'SELECT c.* FROM candidatures c
+             INNER JOIN offres_emploi o ON c.offre_id = o.id
+             WHERE c.id = :id AND o.site_id = :site_id LIMIT 1'
+        );
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $old = $stmt->fetch();
-        if (!$old) { Response::notFound('Application not found'); return; }
+        if (!$old) { Response::notFound('Candidature not found'); return; }
 
-        $stmt = $db->prepare('UPDATE recrutement_applications SET deleted_at = NOW() WHERE id = :id');
+        $stmt = $db->prepare('DELETE FROM candidatures WHERE id = :id');
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
-        
-        Audit::log((int) $admin['id'], $siteId, 'soft_delete', 'recrutement_application', $id, $old, null);
-        Response::success(null, 'Application deleted');
+
+        Audit::log((int) $admin['id'], $siteId, 'delete', 'candidature', $id, $old, null);
+        Response::noContent();
     });
 }

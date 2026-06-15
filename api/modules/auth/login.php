@@ -64,21 +64,9 @@ function registerAuthLoginRoutes(Router $router): void
         $ip = RateLimit::getClientIp();
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
 
-        // Créer une session
-        $sessionToken = Auth::generateRandomToken(64);
+        // Créer une session (schéma v2 : id=token | Ionos prod : colonne token + id auto)
         $expiresAt = date('Y-m-d H:i:s', time() + JWT_EXPIRY);
-
-        $stmt = $db->prepare(
-            'INSERT INTO core_admin_sessions (admin_id, token, ip_address, user_agent, expires_at) 
-             VALUES (:admin_id, :token, :ip, :user_agent, :expires_at)'
-        );
-        $stmt->bindParam(':admin_id', $adminId, PDO::PARAM_INT);
-        $stmt->bindParam(':token', $sessionToken, PDO::PARAM_STR);
-        $stmt->bindParam(':ip', $ip, PDO::PARAM_STR);
-        $stmt->bindParam(':user_agent', $userAgent, PDO::PARAM_STR);
-        $stmt->bindParam(':expires_at', $expiresAt, PDO::PARAM_STR);
-        $stmt->execute();
-        $sessionId = (int) $db->lastInsertId();
+        $sessionId = AdminSession::create($db, $adminId, $ip, $userAgent, $expiresAt);
 
         // Générer le JWT
         $jwt = Auth::generateToken([
@@ -101,7 +89,7 @@ function registerAuthLoginRoutes(Router $router): void
             'SELECT s.id, s.name, s.slug, s.domain 
              FROM core_sites s 
              INNER JOIN core_admin_site_access asa ON s.id = asa.site_id 
-             WHERE asa.admin_id = :admin_id AND s.is_active = 1 
+             WHERE asa.admin_id = :admin_id 
              ORDER BY s.id'
         );
         $stmt->bindParam(':admin_id', $adminId, PDO::PARAM_INT);

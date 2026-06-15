@@ -3,7 +3,7 @@ import { useApp } from '@/contexts/AppContext';
 import { useFetch } from '@/hooks/useFetch';
 import { blogPostFromApi } from '@/lib/mappers';
 import { Link } from 'wouter';
-import { GraduationCap, Stethoscope, Briefcase, TrendingUp, Heart, BookOpen, ArrowRight, FileText, Users, Calendar } from 'lucide-react';
+import { GraduationCap, Stethoscope, Briefcase, TrendingUp, Heart, BookOpen, ArrowRight, FileText, Users } from 'lucide-react';
 
 const SITES = [
   {
@@ -49,7 +49,7 @@ const SITES = [
     color: '#DC2626',
     bg: 'rgba(220,38,38,0.1)',
     href: '/coaching',
-    description: 'Coachs, créneaux, blog',
+    description: 'Blog coaching, catégories et tags',
   },
   {
     id: 'trainer' as const,
@@ -68,17 +68,17 @@ export default function Dashboard() {
   // Pour les statistiques, dans un cas réel on aurait une route /api/dashboard/stats
   // Ici on fait quelques requêtes rapides pour les longueurs ou on met des placeholders
   const { data: formations } = useFetch<{ data: unknown[] }>('/formation/courses');
-  const { data: articles } = useFetch<{ data: Record<string, unknown>[] }>('/blog/posts?site=formation');
-  const { data: coaches } = useFetch<{ data: unknown[] }>('/coaching/coaches');
+  const { data: articles } = useFetch<{ data: Record<string, unknown>[] }>('/blog/posts?site_id=1');
+  const { data: offresRec } = useFetch<{ data: unknown[] }>('/recrutement/offers?site_id=2');
+  const { data: offresMed } = useFetch<{ data: unknown[] }>('/recrutement/offers?site_id=3');
+  const { data: trainers } = useFetch<{ data: unknown[] }>('/trainer/trainers');
 
   const stats = [
     { label: 'Formations', value: formations?.data?.length || 0, icon: GraduationCap, color: '#7C3AED' },
-    { label: 'Offres Santé', value: 0, icon: Stethoscope, color: '#059669' }, // TODO: Fetch
-    { label: 'Offres IT', value: 0, icon: Briefcase, color: '#2563EB' }, // TODO: Fetch
+    { label: 'Offres Santé', value: offresMed?.data?.length || 0, icon: Stethoscope, color: '#059669' },
+    { label: 'Offres IT', value: offresRec?.data?.length || 0, icon: Briefcase, color: '#2563EB' },
     { label: 'Articles', value: articles?.data?.length || 0, icon: FileText, color: '#D97706' },
-    { label: 'Coachs', value: coaches?.data?.length || 0, icon: Heart, color: '#DC2626' },
-    { label: 'Articles Trainer', value: 0, icon: BookOpen, color: '#0891B2' },
-    { label: 'Créneaux', value: 0, icon: Calendar, color: '#6366F1' },
+    { label: 'Formateurs', value: trainers?.data?.length || 0, icon: BookOpen, color: '#0891B2' },
     { label: 'Métiers', value: 0, icon: Users, color: '#EC4899' },
   ];
 

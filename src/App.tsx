@@ -13,6 +13,8 @@ import SiteRecrutement from "./pages/SiteRecrutement";
 import SiteCarriere from "./pages/SiteCarriere";
 import SiteCoaching from "./pages/SiteCoaching";
 import SiteTrainer from "./pages/SiteTrainer";
+import MediaLibraryPage from "./pages/MediaLibraryPage";
+import DataManagement from "./pages/DataManagement";
 import UsersPage from "./pages/UsersPage";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
@@ -58,6 +60,12 @@ function Router() {
       </Route>
       <Route path="/coaching">
         <ProtectedRoute component={SiteCoaching} />
+      </Route>
+      <Route path="/media">
+        <ProtectedRoute component={MediaLibraryPage} />
+      </Route>
+      <Route path="/data-management">
+        <ProtectedRoute component={DataManagement} />
       </Route>
       <Route path="/trainer">
         <ProtectedRoute component={SiteTrainer} />

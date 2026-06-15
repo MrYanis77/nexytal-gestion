@@ -1,8 +1,6 @@
 <?php
 /**
- * modules/recrutement/offers.php — CRUD recrutement_offers
- * 
- * Gestion en cascade de : missions, profils, avantages, tags.
+ * modules/recrutement/offers.php — CRUD offres_emploi (v2.1)
  */
 
 function registerRecrutementOffersRoutes(Router $router): void
@@ -11,27 +9,27 @@ function registerRecrutementOffersRoutes(Router $router): void
         $siteId = Middleware::requireSiteIdFromRequest();
         $db = getDb();
         $pagination = Router::getPagination();
-        
-        $where = ['o.site_id = :site_id', 'o.deleted_at IS NULL'];
+
+        $where = ['o.site_id = :site_id'];
         $params = [':site_id' => $siteId];
 
-        if ($status = Router::getQueryParam('status')) {
-            $where[] = 'o.status = :status';
-            $params[':status'] = $status;
+        if ($status = Router::getQueryParam('statut')) {
+            $where[] = 'o.statut = :statut';
+            $params[':statut'] = $status;
         }
 
         $whereClause = 'WHERE ' . implode(' AND ', $where);
 
-        $stmt = $db->prepare("SELECT COUNT(*) as total FROM recrutement_offers o $whereClause");
+        $stmt = $db->prepare("SELECT COUNT(*) as total FROM offres_emploi o $whereClause");
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);
         $stmt->execute();
         $total = (int) $stmt->fetch()['total'];
 
         $stmt = $db->prepare(
-            "SELECT o.*, j.name as job_name, c.name as contract_type_name
-             FROM recrutement_offers o
-             LEFT JOIN recrutement_jobs j ON o.job_id = j.id
-             LEFT JOIN recrutement_contract_types c ON o.contract_type_id = c.id
+            "SELECT o.*, e.nom as entreprise_nom, m.libelle as metier_libelle
+             FROM offres_emploi o
+             LEFT JOIN entreprises e ON o.entreprise_id = e.id
+             LEFT JOIN metiers m ON o.metier_id = m.id
              $whereClause
              ORDER BY o.created_at DESC
              LIMIT :limit OFFSET :offset"
@@ -40,9 +38,8 @@ function registerRecrutementOffersRoutes(Router $router): void
         $stmt->bindValue(':limit', $pagination['limit'], PDO::PARAM_INT);
         $stmt->bindValue(':offset', $pagination['offset'], PDO::PARAM_INT);
         $stmt->execute();
-        $offers = $stmt->fetchAll();
 
-        Response::paginated($offers, $total, $pagination['page'], $pagination['limit']);
+        Response::paginated($stmt->fetchAll(), $total, $pagination['page'], $pagination['limit']);
     });
 
     $router->get('/api/admin/recrutement/offers/{id}', function (array $params) {
@@ -51,32 +48,23 @@ function registerRecrutementOffersRoutes(Router $router): void
         $id = (int) $params['id'];
 
         $stmt = $db->prepare(
-            "SELECT o.*, j.name as job_name, c.name as contract_type_name
-             FROM recrutement_offers o
-             LEFT JOIN recrutement_jobs j ON o.job_id = j.id
-             LEFT JOIN recrutement_contract_types c ON o.contract_type_id = c.id
-             WHERE o.id = :id AND o.site_id = :site_id AND o.deleted_at IS NULL LIMIT 1"
+            'SELECT o.*, e.nom as entreprise_nom, m.libelle as metier_libelle
+             FROM offres_emploi o
+             LEFT JOIN entreprises e ON o.entreprise_id = e.id
+             LEFT JOIN metiers m ON o.metier_id = m.id
+             WHERE o.id = :id AND o.site_id = :site_id LIMIT 1'
         );
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $offer = $stmt->fetch();
-
         if (!$offer) { Response::notFound('Offer not found'); return; }
 
-        // Fetch cascaded entities
-        foreach (['missions' => 'recrutement_offer_missions', 'profiles' => 'recrutement_offer_profiles', 'advantages' => 'recrutement_offer_advantages'] as $key => $table) {
-            $stmtList = $db->prepare("SELECT content FROM $table WHERE offer_id = :offer_id ORDER BY sort_order ASC");
-            $stmtList->bindParam(':offer_id', $id, PDO::PARAM_INT);
-            $stmtList->execute();
-            $offer[$key] = array_column($stmtList->fetchAll(), 'content');
-        }
-
-        // Fetch Tags
-        $stmtTag = $db->prepare('SELECT t.id, t.name, t.slug FROM recrutement_tags t INNER JOIN recrutement_offer_tags ot ON t.id = ot.tag_id WHERE ot.offer_id = :offer_id');
-        $stmtTag->bindParam(':offer_id', $id, PDO::PARAM_INT);
-        $stmtTag->execute();
-        $offer['tags'] = $stmtTag->fetchAll();
+        $stmtC = $db->prepare(
+            'SELECT c.*, oc.importance FROM competences c
+             INNER JOIN offre_competences oc ON c.id = oc.competence_id
+             WHERE oc.offre_id = :id'
+        );
+        $stmtC->execute([':id' => $id]);
+        $offer['competences'] = $stmtC->fetchAll();
 
         Response::success($offer);
     });
@@ -86,89 +74,73 @@ function registerRecrutementOffersRoutes(Router $router): void
         $admin = Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
         $data = Router::getJsonBody();
 
-        Validator::make($data)
-            ->required('title', 'Title')
-            ->required('contract_type_id', 'Contract Type')
-            ->required('company_name', 'Company name')
-            ->required('location', 'Location')
-            ->required('short_desc', 'Short description')
-            ->required('full_desc', 'Full description')
-            ->validate();
+        Validator::make($data)->required('entreprise_id', 'Entreprise')->required('titre', 'Titre')->validate();
+        $slug = $data['slug'] ?? Validator::slugify($data['titre']);
 
-        $slug = $data['slug'] ?? Validator::slugify($data['title']);
         $db = getDb();
         $db->beginTransaction();
-
         try {
+            $stmt = $db->prepare('SELECT id FROM offres_emploi WHERE site_id = :site_id AND slug = :slug LIMIT 1');
+            $stmt->execute([':site_id' => $siteId, ':slug' => $slug]);
+            if ($stmt->fetch()) { Response::badRequest('Offer slug already exists'); return; }
+
+            $statut = $data['statut'] ?? 'brouillon';
+            $pubAt = ($statut === 'publiee') ? date('Y-m-d H:i:s') : ($data['date_publication'] ?? null);
+
             $stmt = $db->prepare(
-                'INSERT INTO recrutement_offers 
-                 (site_id, job_id, contract_type_id, profession_id, title, slug, company_name, location, postal_code, salary_range, experience_level, duration, is_urgent, short_desc, full_desc, status, published_at, expires_at, created_by, created_at)
-                 VALUES 
-                 (:site_id, :job_id, :contract_type_id, :profession_id, :title, :slug, :company_name, :location, :postal_code, :salary_range, :experience_level, :duration, :is_urgent, :short_desc, :full_desc, :status, :published_at, :expires_at, :created_by, NOW())'
+                'INSERT INTO offres_emploi
+                 (site_id, entreprise_id, recruteur_id, metier_id, reference, slug, titre, description, profil_recherche,
+                  avantages, type_contrat, experience_min, salaire_min, salaire_max, salaire_afficher, teletravail,
+                  temps_travail, ville, code_postal, departement, region, is_featured, is_urgent, statut,
+                  date_publication, date_expiration, meta_title, meta_description, created_at, updated_at)
+                 VALUES
+                 (:site_id, :eid, :rid, :mid, :ref, :slug, :titre, :desc, :pr, :av, :tc, :exp, :smin, :smax, :saff,
+                  :tele, :tt, :ville, :cp, :dep, :reg, :feat, :urg, :statut, :pub_at, :exp_at, :mt, :md, NOW(), NOW())'
             );
-            $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-            $jobId = isset($data['job_id']) && $data['job_id'] !== '' && $data['job_id'] !== null
-                ? (int) $data['job_id'] : null;
-            $stmt->bindValue(':job_id', $jobId, $jobId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-            $stmt->bindParam(':contract_type_id', $data['contract_type_id'], PDO::PARAM_INT);
-            $profId = $data['profession_id'] ?? null;
-            $stmt->bindParam(':profession_id', $profId, PDO::PARAM_INT);
-            $stmt->bindParam(':title', $data['title'], PDO::PARAM_STR);
-            $stmt->bindParam(':slug', $slug, PDO::PARAM_STR);
-            $compName = $data['company_name'] ?? null;
-            $stmt->bindParam(':company_name', $compName, PDO::PARAM_STR);
-            $loc = $data['location'] ?? null;
-            $stmt->bindParam(':location', $loc, PDO::PARAM_STR);
-            $pc = $data['postal_code'] ?? null;
-            $stmt->bindParam(':postal_code', $pc, PDO::PARAM_STR);
-            $sal = $data['salary_range'] ?? null;
-            $stmt->bindParam(':salary_range', $sal, PDO::PARAM_STR);
-            $exp = $data['experience_level'] ?? null;
-            $stmt->bindParam(':experience_level', $exp, PDO::PARAM_STR);
-            $dur = $data['duration'] ?? null;
-            $stmt->bindParam(':duration', $dur, PDO::PARAM_STR);
-            $urgent = isset($data['is_urgent']) ? (int) $data['is_urgent'] : 0;
-            $stmt->bindParam(':is_urgent', $urgent, PDO::PARAM_INT);
-            $short = $data['short_desc'] ?? null;
-            $stmt->bindParam(':short_desc', $short, PDO::PARAM_STR);
-            $full = $data['full_desc'] ?? null;
-            $stmt->bindParam(':full_desc', $full, PDO::PARAM_STR);
-            $status = $data['status'] ?? 'draft';
-            $stmt->bindParam(':status', $status, PDO::PARAM_STR);
-            $pubAt = ($status === 'published') ? date('Y-m-d H:i:s') : ($data['published_at'] ?? null);
-            $stmt->bindParam(':published_at', $pubAt, PDO::PARAM_STR);
-            $expAt = $data['expires_at'] ?? null;
-            $stmt->bindParam(':expires_at', $expAt, PDO::PARAM_STR);
-            $stmt->bindParam(':created_by', $admin['id'], PDO::PARAM_INT);
+            $stmt->bindValue(':site_id', $siteId, PDO::PARAM_INT);
+            $stmt->bindValue(':eid', $data['entreprise_id'], PDO::PARAM_INT);
+            $stmt->bindValue(':rid', $data['recruteur_id'] ?? null, PDO::PARAM_INT);
+            $stmt->bindValue(':mid', $data['metier_id'] ?? null, PDO::PARAM_INT);
+            $stmt->bindValue(':ref', $data['reference'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':slug', $slug, PDO::PARAM_STR);
+            $stmt->bindValue(':titre', $data['titre'], PDO::PARAM_STR);
+            $stmt->bindValue(':desc', $data['description'] ?? '—', PDO::PARAM_STR);
+            $stmt->bindValue(':pr', $data['profil_recherche'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':av', $data['avantages'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':tc', $data['type_contrat'] ?? 'cdi', PDO::PARAM_STR);
+            $stmt->bindValue(':exp', $data['experience_min'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':smin', $data['salaire_min'] ?? null, PDO::PARAM_INT);
+            $stmt->bindValue(':smax', $data['salaire_max'] ?? null, PDO::PARAM_INT);
+            $stmt->bindValue(':saff', $data['salaire_afficher'] ?? 1, PDO::PARAM_INT);
+            $stmt->bindValue(':tele', $data['teletravail'] ?? 'non', PDO::PARAM_STR);
+            $stmt->bindValue(':tt', $data['temps_travail'] ?? 'temps_plein', PDO::PARAM_STR);
+            $stmt->bindValue(':ville', $data['ville'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':cp', $data['code_postal'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':dep', $data['departement'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':reg', $data['region'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':feat', $data['is_featured'] ?? 0, PDO::PARAM_INT);
+            $stmt->bindValue(':urg', $data['is_urgent'] ?? 0, PDO::PARAM_INT);
+            $stmt->bindValue(':statut', $statut, PDO::PARAM_STR);
+            $stmt->bindValue(':pub_at', $pubAt, PDO::PARAM_STR);
+            $stmt->bindValue(':exp_at', $data['date_expiration'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':mt', $data['meta_title'] ?? null, PDO::PARAM_STR);
+            $stmt->bindValue(':md', $data['meta_description'] ?? null, PDO::PARAM_STR);
             $stmt->execute();
-            
-            $offerId = (int) $db->lastInsertId();
 
-            foreach (['missions' => 'recrutement_offer_missions', 'profiles' => 'recrutement_offer_profiles', 'advantages' => 'recrutement_offer_advantages'] as $key => $table) {
-                if (!empty($data[$key]) && is_array($data[$key])) {
-                    $stmtList = $db->prepare("INSERT INTO $table (offer_id, content, sort_order) VALUES (:offer_id, :content, :sort_order)");
-                    foreach ($data[$key] as $idx => $content) {
-                        $stmtList->bindValue(':offer_id', $offerId, PDO::PARAM_INT);
-                        $stmtList->bindValue(':content', $content, PDO::PARAM_STR);
-                        $stmtList->bindValue(':sort_order', $idx, PDO::PARAM_INT);
-                        $stmtList->execute();
-                    }
-                }
-            }
+            $newId = (int) $db->lastInsertId();
 
-            if (!empty($data['tag_ids']) && is_array($data['tag_ids'])) {
-                $stmtTag = $db->prepare('INSERT INTO recrutement_offer_tags (offer_id, tag_id) VALUES (:offer_id, :tag_id)');
-                foreach ($data['tag_ids'] as $tagId) {
-                    $stmtTag->bindValue(':offer_id', $offerId, PDO::PARAM_INT);
-                    $stmtTag->bindValue(':tag_id', (int) $tagId, PDO::PARAM_INT);
-                    $stmtTag->execute();
+            if (!empty($data['competences_text'])) {
+                offreSyncCompetencesFromText($db, $newId, (string) $data['competences_text']);
+            } elseif (isset($data['competences']) && is_array($data['competences'])) {
+                $stmtC = $db->prepare('INSERT INTO offre_competences (offre_id, competence_id, importance) VALUES (:oid, :cid, :imp)');
+                foreach ($data['competences'] as $c) {
+                    $stmtC->execute([':oid' => $newId, ':cid' => $c['competence_id'], ':imp' => $c['importance'] ?? 'essentielle']);
                 }
             }
 
             $db->commit();
-            Audit::log((int) $admin['id'], $siteId, 'create', 'recrutement_offer', $offerId, null, $data);
-            Response::created(['id' => $offerId]);
-
+            Audit::log((int) $admin['id'], $siteId, 'create', 'offre_emploi', $newId, null, $data);
+            Response::created(['id' => $newId]);
         } catch (\Exception $e) {
             $db->rollBack();
             Response::serverError('Failed to create offer', $e->getMessage());
@@ -182,65 +154,50 @@ function registerRecrutementOffersRoutes(Router $router): void
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT * FROM recrutement_offers WHERE id = :id AND site_id = :site_id AND deleted_at IS NULL LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT * FROM offres_emploi WHERE id = :id AND site_id = :site_id LIMIT 1');
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $old = $stmt->fetch();
-
         if (!$old) { Response::notFound('Offer not found'); return; }
 
         $db->beginTransaction();
         try {
-            $fields = []; $bind = [];
-            $updatable = ['job_id', 'contract_type_id', 'profession_id', 'title', 'slug', 'company_name', 'location', 'postal_code', 'salary_range', 'experience_level', 'duration', 'is_urgent', 'short_desc', 'full_desc', 'status', 'published_at', 'expires_at'];
+            $fields = [];
+            $bind = [];
+            $updatable = [
+                'entreprise_id', 'recruteur_id', 'metier_id', 'reference', 'slug', 'titre', 'description',
+                'profil_recherche', 'avantages', 'type_contrat', 'experience_min', 'salaire_min', 'salaire_max',
+                'salaire_afficher', 'teletravail', 'temps_travail', 'ville', 'code_postal', 'departement',
+                'region', 'is_featured', 'is_urgent', 'statut', 'date_publication', 'date_expiration',
+                'meta_title', 'meta_description',
+            ];
             foreach ($updatable as $f) {
                 if (array_key_exists($f, $data)) {
                     $fields[] = "$f = :$f";
                     $bind[":$f"] = $data[$f];
                 }
             }
-
-            if (isset($data['status']) && $data['status'] === 'published' && $old['status'] !== 'published' && !isset($data['published_at'])) {
-                $fields[] = "published_at = NOW()";
-            }
-
             if (!empty($fields)) {
-                $fields[] = "updated_at = NOW()";
-                $sql = 'UPDATE recrutement_offers SET ' . implode(', ', $fields) . ' WHERE id = :id';
-                $stmt = $db->prepare($sql);
-                foreach ($bind as $k => $v) $stmt->bindValue($k, $v);
-                $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-                $stmt->execute();
+                $fields[] = 'updated_at = NOW()';
+                $sql = 'UPDATE offres_emploi SET ' . implode(', ', $fields) . ' WHERE id = :id';
+                $stmtU = $db->prepare($sql);
+                foreach ($bind as $k => $v) $stmtU->bindValue($k, $v);
+                $stmtU->bindParam(':id', $id, PDO::PARAM_INT);
+                $stmtU->execute();
             }
 
-            foreach (['missions' => 'recrutement_offer_missions', 'profiles' => 'recrutement_offer_profiles', 'advantages' => 'recrutement_offer_advantages'] as $key => $table) {
-                if (isset($data[$key]) && is_array($data[$key])) {
-                    $db->prepare("DELETE FROM $table WHERE offer_id = :id")->execute([':id' => $id]);
-                    $stmtList = $db->prepare("INSERT INTO $table (offer_id, content, sort_order) VALUES (:offer_id, :content, :sort_order)");
-                    foreach ($data[$key] as $idx => $content) {
-                        $stmtList->bindValue(':offer_id', $id, PDO::PARAM_INT);
-                        $stmtList->bindValue(':content', $content, PDO::PARAM_STR);
-                        $stmtList->bindValue(':sort_order', $idx, PDO::PARAM_INT);
-                        $stmtList->execute();
-                    }
-                }
-            }
-
-            if (isset($data['tag_ids']) && is_array($data['tag_ids'])) {
-                $db->prepare("DELETE FROM recrutement_offer_tags WHERE offer_id = :id")->execute([':id' => $id]);
-                $stmtTag = $db->prepare('INSERT INTO recrutement_offer_tags (offer_id, tag_id) VALUES (:offer_id, :tag_id)');
-                foreach ($data['tag_ids'] as $tagId) {
-                    $stmtTag->bindValue(':offer_id', $id, PDO::PARAM_INT);
-                    $stmtTag->bindValue(':tag_id', (int) $tagId, PDO::PARAM_INT);
-                    $stmtTag->execute();
+            if (array_key_exists('competences_text', $data)) {
+                offreSyncCompetencesFromText($db, $id, (string) ($data['competences_text'] ?? ''));
+            } elseif (isset($data['competences']) && is_array($data['competences'])) {
+                $db->prepare('DELETE FROM offre_competences WHERE offre_id = :id')->execute([':id' => $id]);
+                $stmtC = $db->prepare('INSERT INTO offre_competences (offre_id, competence_id, importance) VALUES (:oid, :cid, :imp)');
+                foreach ($data['competences'] as $c) {
+                    $stmtC->execute([':oid' => $id, ':cid' => $c['competence_id'], ':imp' => $c['importance'] ?? 'essentielle']);
                 }
             }
 
             $db->commit();
-            Audit::log((int) $admin['id'], $siteId, 'update', 'recrutement_offer', $id, $old, $data);
+            Audit::log((int) $admin['id'], $siteId, 'update', 'offre_emploi', $id, $old, $data);
             Response::success(['id' => $id], 'Offer updated');
-
         } catch (\Exception $e) {
             $db->rollBack();
             Response::serverError('Failed to update offer', $e->getMessage());
@@ -253,17 +210,84 @@ function registerRecrutementOffersRoutes(Router $router): void
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT id FROM recrutement_offers WHERE id = :id AND site_id = :site_id AND deleted_at IS NULL LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT * FROM offres_emploi WHERE id = :id AND site_id = :site_id LIMIT 1');
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $old = $stmt->fetch();
         if (!$old) { Response::notFound('Offer not found'); return; }
 
-        $stmt = $db->prepare('UPDATE recrutement_offers SET deleted_at = NOW() WHERE id = :id');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->execute();
-        Audit::log((int) $admin['id'], $siteId, 'soft_delete', 'recrutement_offer', $id, $old, null);
-        Response::success(null, 'Offer deleted');
+        $db->beginTransaction();
+        try {
+            // Check for existing applications
+            $stmtCheck = $db->prepare('SELECT COUNT(*) as count FROM candidatures WHERE offre_id = :id');
+            $stmtCheck->execute([':id' => $id]);
+            $hasCandidatures = $stmtCheck->fetch()['count'] > 0;
+            
+            $stmtCheckExt = $db->prepare('SELECT COUNT(*) as count FROM candidatures_externes WHERE offre_id = :id');
+            $stmtCheckExt->execute([':id' => $id]);
+            $hasCandidaturesExt = $stmtCheckExt->fetch()['count'] > 0;
+
+            if ($hasCandidatures || $hasCandidaturesExt) {
+                $db->rollBack();
+                Response::badRequest('Impossible de supprimer cette offre car elle possède des candidatures liées.');
+                return;
+            }
+
+            // Manually delete dependent records
+            $db->prepare('DELETE FROM offre_competences WHERE offre_id = :id')->execute([':id' => $id]);
+            $db->prepare('DELETE FROM offres_favorites WHERE offre_id = :id')->execute([':id' => $id]);
+
+            $stmt = $db->prepare('DELETE FROM offres_emploi WHERE id = :id');
+            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+
+            $db->commit();
+            Audit::log((int) $admin['id'], $siteId, 'delete', 'offre_emploi', $id, $old, null);
+            Response::noContent();
+        } catch (\Exception $e) {
+            $db->rollBack();
+            Response::serverError('Failed to delete offer', $e->getMessage());
+        }
     });
+}
+
+/**
+ * Crée ou réutilise des compétences à partir d'un texte libre (une par ligne).
+ */
+function offreSyncCompetencesFromText(PDO $db, int $offreId, string $text): void
+{
+    $db->prepare('DELETE FROM offre_competences WHERE offre_id = :id')->execute([':id' => $offreId]);
+
+    $labels = preg_split('/[\r\n,;]+/', $text) ?: [];
+    $stmtFind = $db->prepare('SELECT id FROM competences WHERE label = :label LIMIT 1');
+    $stmtInsert = $db->prepare('INSERT INTO competences (slug, label, categorie) VALUES (:slug, :label, :cat)');
+    $stmtLink = $db->prepare('INSERT INTO offre_competences (offre_id, competence_id, importance) VALUES (:oid, :cid, :imp)');
+
+    foreach ($labels as $label) {
+        $label = trim($label);
+        if ($label === '') {
+            continue;
+        }
+
+        $stmtFind->execute([':label' => $label]);
+        $existing = $stmtFind->fetch();
+        if ($existing) {
+            $competenceId = (int) $existing['id'];
+        } else {
+            $slug = Validator::slugify($label);
+            $baseSlug = $slug;
+            $n = 1;
+            $stmtSlugCheck = $db->prepare('SELECT id FROM competences WHERE slug = :slug LIMIT 1');
+            while (true) {
+                $stmtSlugCheck->execute([':slug' => $slug]);
+                if (!$stmtSlugCheck->fetch()) {
+                    break;
+                }
+                $slug = $baseSlug . '-' . $n++;
+            }
+            $stmtInsert->execute([':slug' => $slug, ':label' => $label, ':cat' => 'technique']);
+            $competenceId = (int) $db->lastInsertId();
+        }
+
+        $stmtLink->execute([':oid' => $offreId, ':cid' => $competenceId, ':imp' => 'essentielle']);
+    }
 }

@@ -141,6 +141,12 @@ async function main() {
   });
   ctx.sectorItId = r.id;
 
+  r = await postTable('competences', '/api/admin/recrutement/competences', {
+    token,
+    body: { label: `Compétence test ${SUFFIX}`, categorie: 'technique' },
+  });
+  ctx.competenceId = r.id;
+
   if (ctx.sectorItId) {
     r = await postTable('recrutement_jobs', '/api/admin/recrutement/jobs', {
       token,

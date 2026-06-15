@@ -49,6 +49,31 @@ function registerBlogCommentsRoutes(Router $router): void
         Response::paginated($stmt->fetchAll(), $total, $pagination['page'], $pagination['limit']);
     });
 
+    $router->post('/api/admin/blog/comments', function () {
+        $siteId = Middleware::requireSiteIdFromRequest();
+        $admin = Middleware::requireRole(['superadmin', 'admin', 'editor', 'moderator']);
+        $data = Router::getJsonBody();
+        Validator::make($data)->required('post_id', 'Post')->required('author_name', 'Author')->required('author_email', 'Email')->required('content', 'Content')->validate();
+
+        $db = getDb();
+        $stmt = $db->prepare('SELECT id FROM blog_posts WHERE id = :id AND site_id = :site_id AND deleted_at IS NULL LIMIT 1');
+        $stmt->execute([':id' => $data['post_id'], ':site_id' => $siteId]);
+        if (!$stmt->fetch()) { Response::badRequest('Invalid post'); return; }
+
+        $stmt = $db->prepare(
+            'INSERT INTO blog_comments (post_id, author_name, author_email, content, status, created_at, updated_at)
+             VALUES (:pid, :an, :ae, :content, :st, NOW(), NOW())'
+        );
+        $stmt->execute([
+            ':pid' => $data['post_id'], ':an' => $data['author_name'],
+            ':ae' => $data['author_email'], ':content' => $data['content'],
+            ':st' => $data['status'] ?? 'pending',
+        ]);
+        $newId = (int) $db->lastInsertId();
+        Audit::log((int) $admin['id'], $siteId, 'create', 'blog_comment', $newId, null, $data);
+        Response::created(['id' => $newId]);
+    });
+
     // Modérer un commentaire (changer statut)
     $router->put('/api/admin/blog/comments/{id}', function (array $params) {
         Middleware::requireSiteIdFromRequest();

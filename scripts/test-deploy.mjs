@@ -121,6 +121,16 @@ async function phaseSmoke() {
     log('❌', 'formation_courses', `HTTP ${r.status} ${err(r.data)}`);
   }
 
+  r = await json('POST', '/api/admin/recrutement/competences', {
+    body: { label: `Smoke compétence ${SUFFIX}`, categorie: 'technique' },
+  });
+  if (r.status === 201) {
+    ctx.competenceId = r.data?.data?.id;
+    log('✅', 'competences', `id=${ctx.competenceId}`);
+  } else {
+    log('❌', 'competences', `HTTP ${r.status} ${err(r.data)} — déployez competences.php + index.php`);
+  }
+
   r = await json('POST', '/api/admin/coaching/cities', {
     body: { name: `Smoke ville ${SUFFIX}`, slug: `smoke-ville-${SUFFIX}` },
   });

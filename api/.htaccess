@@ -12,6 +12,7 @@ RewriteEngine On
 RewriteRule ^\.git - [F,L]
 RewriteRule ^\.env - [F,L]
 RewriteRule ^composer\.(json|lock)$ - [F,L]
+RewriteRule ^(test_db|check_fks)\.php$ - [F,L]
 RewriteRule ^config/ - [F,L]
 RewriteRule ^core/ - [F,L]
 RewriteRule ^modules/ - [F,L]

@@ -16,19 +16,9 @@ function registerAuthLogoutRoutes(Router $router): void
         $payload = Auth::verifyToken($token);
 
         if ($payload && isset($payload['session_id'])) {
-            // Supprimer la session spécifique
-            $stmt = $db->prepare(
-                'DELETE FROM core_admin_sessions 
-                 WHERE id = :session_id AND admin_id = :admin_id'
-            );
-            $stmt->bindParam(':session_id', $payload['session_id'], PDO::PARAM_INT);
-            $stmt->bindParam(':admin_id', $admin['id'], PDO::PARAM_INT);
-            $stmt->execute();
+            AdminSession::revoke($db, (string) $payload['session_id'], (int) $admin['id']);
         } else {
-            // Supprimer toutes les sessions de l'admin (fallback)
-            $stmt = $db->prepare('DELETE FROM core_admin_sessions WHERE admin_id = :admin_id');
-            $stmt->bindParam(':admin_id', $admin['id'], PDO::PARAM_INT);
-            $stmt->execute();
+            AdminSession::revokeAllForAdmin($db, (int) $admin['id']);
         }
 
         // Log activité

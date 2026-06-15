@@ -13,7 +13,7 @@ class RateLimit
 
         $stmt = $db->prepare(
             'SELECT COUNT(*) as attempts 
-             FROM core_admin_activity_logs 
+             FROM core_audit_logs 
              WHERE ip_address = :ip 
                AND action = :action 
                AND created_at >= DATE_SUB(NOW(), INTERVAL :window MINUTE)'
@@ -34,33 +34,25 @@ class RateLimit
         }
     }
 
-    /**
-     * @param int|null $adminId Requis par le schéma Ionos (NOT NULL) — ignoré si null
-     */
     public static function logAttempt(
         string $action,
         ?int $adminId = null,
         ?string $resource = 'auth',
-        ?int $sessionId = null
+        ?string $sessionId = null
     ): void {
-        if ($adminId === null) {
-            return;
-        }
-
         try {
             $ip = self::getClientIp();
             $db = getDb();
 
             $stmt = $db->prepare(
-                'INSERT INTO core_admin_activity_logs 
-                 (admin_id, session_id, action, resource, ip_address, created_at) 
-                 VALUES (:admin_id, :session_id, :action, :resource, :ip, NOW())'
+                'INSERT INTO core_audit_logs 
+                 (admin_id, action, entity_type, ip_address, created_at) 
+                 VALUES (:admin_id, :action, :resource, :ip, NOW())'
             );
-            $stmt->bindParam(':admin_id', $adminId, PDO::PARAM_INT);
-            $stmt->bindParam(':session_id', $sessionId, PDO::PARAM_INT);
-            $stmt->bindParam(':action', $action, PDO::PARAM_STR);
-            $stmt->bindParam(':resource', $resource, PDO::PARAM_STR);
-            $stmt->bindParam(':ip', $ip, PDO::PARAM_STR);
+            $stmt->bindValue(':admin_id', $adminId, PDO::PARAM_INT);
+            $stmt->bindValue(':action', $action, PDO::PARAM_STR);
+            $stmt->bindValue(':resource', $resource, PDO::PARAM_STR);
+            $stmt->bindValue(':ip', $ip, PDO::PARAM_STR);
             $stmt->execute();
         } catch (\Exception $e) {
             if (APP_ENV === 'development') {

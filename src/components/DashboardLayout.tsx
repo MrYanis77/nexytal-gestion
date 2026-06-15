@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   LayoutDashboard, GraduationCap, Stethoscope, Briefcase,
   TrendingUp, Heart, Users, LogOut, ChevronLeft, ChevronRight,
-  Settings, BookOpen, Zap, Menu, X
+  Settings, BookOpen, Zap, Menu, X, Database, Images
 } from 'lucide-react';
 
 interface NavItem {
@@ -21,6 +21,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Tableau de bord', href: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" />, color: '#2563EB' },
+  { label: 'Médiathèque', href: '/media', icon: <Images className="w-4 h-4" />, color: '#8B5CF6' },
   { label: 'Alt Formation', href: '/formation', icon: <GraduationCap className="w-4 h-4" />, site: 'formation', color: '#7C3AED' },
   { label: 'Nexytal Medical', href: '/medical', icon: <Stethoscope className="w-4 h-4" />, site: 'medical', color: '#059669' },
   { label: 'Nexytal Recrutement', href: '/recrutement', icon: <Briefcase className="w-4 h-4" />, site: 'recrutement', color: '#2563EB' },
@@ -30,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const ADMIN_ITEMS: NavItem[] = [
+  { label: 'Gestion Données', href: '/data-management', icon: <Database className="w-4 h-4" />, color: '#6366f1' },
   { label: 'Utilisateurs', href: '/users', icon: <Users className="w-4 h-4" />, color: '#6B7280' },
   { label: 'Paramètres', href: '/settings', icon: <Settings className="w-4 h-4" />, color: '#6B7280' },
 ];

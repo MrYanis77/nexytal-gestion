@@ -69,7 +69,8 @@ INSERT IGNORE INTO `core_admin_site_access` (`admin_id`, `site_id`) VALUES
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- =============================================================================
--- Après exécution, connectez-vous sur https://connexion.nexytal.com/login avec :
---   admin              /  password   (Option A)
---   admin@nexytal.com  /  password   (Option B)
+-- Après exécution, connectez-vous avec admin@nexytal.com / password
+--
+-- Données de démo (toutes les tables) : exécutez ensuite api/sql/seed_demo.sql
+-- ou : php import_seed.php
 -- =============================================================================

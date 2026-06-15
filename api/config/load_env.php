@@ -1,7 +1,7 @@
 <?php
 /**
- * Charge les variables depuis un fichier .env (lignes KEY=VALUE).
- * Cherche dans api/config/.env puis à la racine du projet.
+ * Charge les variables depuis un fichier KEY=VALUE.
+ * Ordre : .env → env (sans point, FTP Ionos) → secrets.env → racine projet.
  */
 
 /** @var list<string> Fichiers .env effectivement chargés */
@@ -70,11 +70,13 @@ function env(string $key, ?string $default = null): ?string
 
 $envDir = dirname(__DIR__);
 
-// 1. Secrets (.env) en premier — DB_PASSWORD prioritaire
+// 1. Secrets — DB_PASSWORD (fichier « env » sans point : plus fiable sur FTP Ionos)
 loadEnvFile(__DIR__ . '/.env');
+loadEnvFile(__DIR__ . '/env');
+loadEnvFile(__DIR__ . '/secrets.env');
 loadEnvFile($envDir . '/../.env');
 
-// 2. Hôte / base / user (config.local.php ne doit PAS définir DB_PASS)
+// 2. Surcharges hôte / base / user / mot de passe (config.local.php)
 if (is_readable(__DIR__ . '/config.local.php')) {
     require __DIR__ . '/config.local.php';
 }

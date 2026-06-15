@@ -51,24 +51,21 @@ export interface User {
 export interface Formation {
   id: string;
   titre: string;
-  subtitle?: string;
+  hero_subtitle?: string;
+  type?: string;
   category_id?: string;
   categorie: string;
   description: string;
-  programme: string;
   video_url?: string;
+  hero_image_url?: string;
+  card_image_url?: string;
   duree: string;
-  price?: string;
-  certifiante: boolean;
-  is_alternance?: boolean;
-  rncp_repertoire?: string;
-  rncp?: string;
-  rncp_title?: string;
-  rncp_level?: string;
-  rncp_url?: string;
+  certification_label?: string;
   presentation_title?: string;
   cta_title?: string;
   cta_subtitle?: string;
+  cta_button_label?: string;
+  cta_button_url?: string;
   meta_title?: string;
   meta_description?: string;
   statut: 'publie' | 'brouillon';
@@ -97,19 +94,19 @@ export interface BlogArticle {
 export interface OffreEmploi {
   id: string;
   titre: string;
+  entreprise_id?: string;
   entreprise: string;
+  metier_id?: string;
   lieu: string;
   postal_code?: string;
-  contract_type_id?: string;
+  type_contrat?: string;
   contrat: string;
-  profession_id?: string;
-  job_id?: string;
   salaire?: string;
-  duration?: string;
+  salaire_min?: string;
+  salaire_max?: string;
   secteur: string;
-  short_desc?: string;
+  profil_recherche?: string;
   description: string;
-  experience?: string;
   urgent: boolean;
   date: string;
   expires_at?: string;
@@ -122,66 +119,50 @@ export interface Metier {
   nom: string;
   slug: string;
   secteur: string;
+  secteur_id?: string;
   description: string;
   statut: 'publie' | 'brouillon';
 }
 
-export interface Coach {
+export interface Entreprise {
   id: string;
   nom: string;
-  email: string;
-  phone?: string;
-  avatar_url?: string;
-  titre: string;
-  short_bio?: string;
-  bio: string;
-  experience_years?: string;
-  languages?: string;
-  city_id?: string;
-  localisation: string;
-  visible: boolean;
-  statut: string;
-  meta_title?: string;
-  meta_description?: string;
-  createdAt: string;
-}
-
-export interface Creneau {
-  id: string;
-  date: string;
-  heure: string;
-  coach?: string;
-  coach_nom?: string;
-  client_nom?: string;
-  client_email?: string;
-  statut: string;
-  notes?: string;
+  slug: string;
+  siret?: string;
+  description: string;
+  logo_url?: string;
+  site_web?: string;
+  ville?: string;
+  code_postal?: string;
+  secteur_id?: string;
+  validee: boolean;
 }
 
 export interface Formateur {
   id: string;
+  prenom: string;
   nom: string;
+  nomComplet: string;
   email: string;
+  phone?: string;
+  titre: string;
+  avatar_url?: string;
+  city_id?: string;
   region: string;
   expertise: string[];
   tjm?: string;
   disponibilite: boolean;
   modalite: string[];
   bio: string;
-  certifications: string[];
-  statut: 'actif' | 'inactif';
+  statut: 'actif' | 'inactif' | 'en_attente';
   createdAt: string;
 }
 
-// L'interface AppData est conservée mais vide par défaut car les pages vont fetch les données
 export interface AppData {
   formations: Formation[];
   offresEmploi: OffreEmploi[];
   metiers: Metier[];
-  offresIT: OffreEmploi[];
   articles: BlogArticle[];
-  coachs: Coach[];
-  creneaux: Creneau[];
   formateurs: Formateur[];
 }
 
@@ -189,11 +170,8 @@ export const defaultData: AppData = {
   formations: [],
   offresEmploi: [],
   metiers: [],
-  offresIT: [],
   articles: [],
-  coachs: [],
-  creneaux: [],
-  formateurs: []
+  formateurs: [],
 };
 
 // ─── Context ──────────────────────────────────────────────────────────────────

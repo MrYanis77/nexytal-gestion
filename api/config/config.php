@@ -20,14 +20,14 @@ if (!defined('DB_NAME')) {
 if (!defined('DB_USER')) {
     define('DB_USER', env('DB_USER', env('DB_USERNAME', 'dbu977482')));
 }
-// Mot de passe : uniquement .env (jamais dans config.local.php)
+// Mot de passe : .env / env / config.local.php (define DB_PASS)
 if (!defined('DB_PASS')) {
-    $dbPass = env('DB_PASSWORD', env('DB_PASS', 'Nexytal@!77'));
+    $dbPass = env('DB_PASSWORD', env('DB_PASS', ''));
     define('DB_PASS', trim((string) $dbPass));
 }
 
 /**
- * Mot de passe effectif : DB_PASSWORD du .env prioritaire sur un ancien DB_PASS dans config.local.php
+ * Mot de passe effectif : DB_PASSWORD (.env ou env) > DB_PASS (config.local.php)
  */
 function resolveDbPassword(): string
 {
@@ -36,7 +36,11 @@ function resolveDbPassword(): string
         return trim((string) $fromEnv);
     }
 
-    return defined('DB_PASS') ? trim((string) DB_PASS) : 'Nexytal@!77';
+    if (defined('DB_PASS') && DB_PASS !== '') {
+        return trim((string) DB_PASS);
+    }
+
+    return '';
 }
 if (!defined('DB_CHARSET')) {
     define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
@@ -58,16 +62,37 @@ if (!defined('UPLOAD_DIR')) {
     define('UPLOAD_DIR', __DIR__ . '/../uploads/');
 }
 if (!defined('UPLOAD_URL')) {
-    define('UPLOAD_URL', '/uploads/');
+    define('UPLOAD_URL', env('UPLOAD_URL', '/api/uploads/'));
 }
 if (!defined('UPLOAD_MAX_SIZE')) {
-    define('UPLOAD_MAX_SIZE', 5 * 1024 * 1024);
+    define('UPLOAD_MAX_SIZE', (int) env('UPLOAD_MAX_SIZE', (string) (5 * 1024 * 1024)));
+}
+if (!defined('UPLOAD_MAX_SIZE_IMAGE')) {
+    define('UPLOAD_MAX_SIZE_IMAGE', (int) env('UPLOAD_MAX_SIZE_IMAGE', (string) (5 * 1024 * 1024)));
+}
+if (!defined('UPLOAD_MAX_SIZE_VIDEO')) {
+    define('UPLOAD_MAX_SIZE_VIDEO', (int) env('UPLOAD_MAX_SIZE_VIDEO', (string) (100 * 1024 * 1024)));
+}
+if (!defined('UPLOAD_MAX_SIZE_DOCUMENT')) {
+    define('UPLOAD_MAX_SIZE_DOCUMENT', (int) env('UPLOAD_MAX_SIZE_DOCUMENT', (string) (10 * 1024 * 1024)));
+}
+/** Marge minimale à conserver sur le disque après chaque upload (octets). */
+if (!defined('UPLOAD_MIN_FREE_BYTES')) {
+    define('UPLOAD_MIN_FREE_BYTES', (int) env('UPLOAD_MIN_FREE_BYTES', (string) (256 * 1024 * 1024)));
+}
+/**
+ * Base URL publique CDN (domaine couvert par Ionos CDN / Cloudflare).
+ * Ex. https://www.connexion.nexytal.com — laisser vide pour chemins relatifs same-origin.
+ */
+if (!defined('MEDIA_PUBLIC_BASE_URL')) {
+    define('MEDIA_PUBLIC_BASE_URL', rtrim((string) env('MEDIA_PUBLIC_BASE_URL', ''), '/'));
 }
 
 // ===== CORS =====
 if (!defined('ALLOWED_ORIGINS')) {
     define('ALLOWED_ORIGINS', [
         'https://connexion.nexytal.com',
+        'https://www.connexion.nexytal.com',
         'https://alt-formation.fr',
         'https://recrutement.nexytal.com',
         'https://medical.nexytal.com',

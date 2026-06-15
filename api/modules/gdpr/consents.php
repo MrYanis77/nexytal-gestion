@@ -29,7 +29,7 @@ function registerGdprConsentsRoutes(Router $router): void
         $stmt = $db->prepare(
             "SELECT * FROM gdpr_consents_log 
              $whereClause 
-             ORDER BY created_at DESC 
+             ORDER BY granted_at DESC 
              LIMIT :limit OFFSET :offset"
         );
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);

@@ -32,20 +32,23 @@ CREATE TABLE IF NOT EXISTS `gdpr_deletion_requests` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `media_library` (
-  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `site_id` int(10) UNSIGNED DEFAULT NULL COMMENT 'NULL = média global partagé',
+  `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `site_id` int(11) DEFAULT NULL COMMENT 'NULL = média global partagé',
   `file_name` varchar(255) NOT NULL,
+  `original_name` varchar(255) DEFAULT NULL,
   `file_path` varchar(500) NOT NULL,
   `mime_type` varchar(100) NOT NULL,
-  `file_size` int(10) UNSIGNED NOT NULL DEFAULT 0,
+  `file_type` enum('image','video','document','other') NOT NULL DEFAULT 'image',
+  `file_size` int(11) UNSIGNED NOT NULL DEFAULT 0,
   `alt_text` varchar(255) DEFAULT NULL,
-  `uploaded_by` int(10) UNSIGNED DEFAULT NULL,
+  `uploaded_by` int(11) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime DEFAULT NULL ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_media_site` (`site_id`),
   KEY `idx_media_mime` (`mime_type`),
-  KEY `fk_media_uploaded` (`uploaded_by`),
+  KEY `idx_media_type` (`file_type`),
+  KEY `idx_media_uploaded` (`uploaded_by`),
   CONSTRAINT `fk_media_site` FOREIGN KEY (`site_id`) REFERENCES `core_sites` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_media_uploaded_by` FOREIGN KEY (`uploaded_by`) REFERENCES `core_admin_users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
