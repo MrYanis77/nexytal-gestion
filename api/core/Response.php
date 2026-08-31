@@ -148,6 +148,47 @@ class Response
     }
 
     /**
+     * Envoie un fichier binaire (CV PDF, etc.).
+     */
+    public static function downloadFile(string $absolutePath, string $downloadName, string $mimeType = 'application/octet-stream'): void
+    {
+        if (!is_file($absolutePath) || !is_readable($absolutePath)) {
+            self::notFound('File not found');
+            return;
+        }
+
+        $safeName = preg_replace('/[^A-Za-z0-9._-]+/', '_', $downloadName) ?: 'download';
+        $size = filesize($absolutePath);
+
+        http_response_code(200);
+        header('Content-Type: ' . $mimeType);
+        header('Content-Disposition: attachment; filename="' . $safeName . '"');
+        header('Content-Length: ' . (string) $size);
+        header('Cache-Control: private, no-store');
+        header('X-Content-Type-Options: nosniff');
+
+        readfile($absolutePath);
+        exit;
+    }
+
+    /**
+     * Télécharge du contenu texte (lettre de motivation).
+     */
+    public static function downloadContent(string $content, string $downloadName, string $mimeType = 'text/plain; charset=utf-8'): void
+    {
+        $safeName = preg_replace('/[^A-Za-z0-9._-]+/', '_', $downloadName) ?: 'download.txt';
+
+        http_response_code(200);
+        header('Content-Type: ' . $mimeType);
+        header('Content-Disposition: attachment; filename="' . $safeName . '"');
+        header('Content-Length: ' . (string) strlen($content));
+        header('Cache-Control: private, no-store');
+
+        echo $content;
+        exit;
+    }
+
+    /**
      * 500 Internal Server Error
      */
     public static function serverError(string $message = 'Internal server error', ?string $detail = null): void

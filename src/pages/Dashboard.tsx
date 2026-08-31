@@ -4,6 +4,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { blogPostFromApi } from '@/lib/mappers';
 import { Link } from 'wouter';
 import { GraduationCap, Stethoscope, Briefcase, TrendingUp, Heart, BookOpen, ArrowRight, FileText, Users } from 'lucide-react';
+import { RecrutementStats } from '@/lib/mappers/spec';
 
 const SITES = [
   {
@@ -13,7 +14,7 @@ const SITES = [
     color: '#7C3AED',
     bg: 'rgba(124,58,237,0.1)',
     href: '/formation',
-    description: 'Formations, certifications RNCP, blog',
+    description: 'Blog et contenus',
   },
   {
     id: 'medical' as const,
@@ -22,7 +23,7 @@ const SITES = [
     color: '#059669',
     bg: 'rgba(5,150,105,0.1)',
     href: '/medical',
-    description: 'Offres d\'emploi santé, métiers, blog',
+    description: 'Contenus santé, métiers et blog',
   },
   {
     id: 'recrutement' as const,
@@ -31,7 +32,7 @@ const SITES = [
     color: '#2563EB',
     bg: 'rgba(37,99,235,0.1)',
     href: '/recrutement',
-    description: 'Offres IT, ressources, blog',
+    description: 'Actualités IT et ressources',
   },
   {
     id: 'carriere' as const,
@@ -40,7 +41,7 @@ const SITES = [
     color: '#D97706',
     bg: 'rgba(217,119,6,0.1)',
     href: '/carriere',
-    description: 'Blog carrière, articles, newsletter',
+    description: 'Blog carrière et contenus',
   },
   {
     id: 'coaching' as const,
@@ -49,7 +50,7 @@ const SITES = [
     color: '#DC2626',
     bg: 'rgba(220,38,38,0.1)',
     href: '/coaching',
-    description: 'Blog coaching, catégories et tags',
+    description: 'Blog et contenus',
   },
   {
     id: 'trainer' as const,
@@ -58,7 +59,7 @@ const SITES = [
     color: '#0891B2',
     bg: 'rgba(8,145,178,0.1)',
     href: '/trainer',
-    description: 'Formateurs, expertises, blog',
+    description: 'Blog et contenus',
   },
 ];
 
@@ -67,19 +68,21 @@ export default function Dashboard() {
 
   // Pour les statistiques, dans un cas réel on aurait une route /api/dashboard/stats
   // Ici on fait quelques requêtes rapides pour les longueurs ou on met des placeholders
-  const { data: formations } = useFetch<{ data: unknown[] }>('/formation/courses');
   const { data: articles } = useFetch<{ data: Record<string, unknown>[] }>('/blog/posts?site_id=1');
-  const { data: offresRec } = useFetch<{ data: unknown[] }>('/recrutement/offers?site_id=2');
-  const { data: offresMed } = useFetch<{ data: unknown[] }>('/recrutement/offers?site_id=3');
-  const { data: trainers } = useFetch<{ data: unknown[] }>('/trainer/trainers');
+
+  const { data: pendingOffres } = useFetch<{ data: unknown[]; pagination?: { total?: number } }>(
+    '/recrutement/offers/pending',
+  );
+  const pendingCount = pendingOffres?.pagination?.total ?? pendingOffres?.data?.length ?? 0;
+
+  const { data: recrutementStats } = useFetch<{ data: RecrutementStats }>('/recrutement/stats');
+  const statsApi = recrutementStats?.data;
 
   const stats = [
-    { label: 'Formations', value: formations?.data?.length || 0, icon: GraduationCap, color: '#7C3AED' },
-    { label: 'Offres Santé', value: offresMed?.data?.length || 0, icon: Stethoscope, color: '#059669' },
-    { label: 'Offres IT', value: offresRec?.data?.length || 0, icon: Briefcase, color: '#2563EB' },
-    { label: 'Articles', value: articles?.data?.length || 0, icon: FileText, color: '#D97706' },
-    { label: 'Formateurs', value: trainers?.data?.length || 0, icon: BookOpen, color: '#0891B2' },
-    { label: 'Métiers', value: 0, icon: Users, color: '#EC4899' },
+    { label: 'Offres en attente', value: statsApi?.offers_this_month.pending ?? pendingCount, icon: Briefcase, color: '#F59E0B', href: '/validation-offres' },
+    { label: 'Offres publiées (mois)', value: statsApi?.offers_this_month.published ?? 0, icon: Briefcase, color: '#10B981', href: '/offres-publiees' },
+    { label: 'Candidatures aujourd\'hui', value: statsApi?.applications_today ?? 0, icon: Users, color: '#6366F1' },
+    { label: 'Articles blog', value: articles?.data?.length || 0, icon: FileText, color: '#D97706' },
   ];
 
   const recentArticles = useMemo(
@@ -104,21 +107,49 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {stats.map(s => (
-          <div key={s.label} className="rounded-xl border border-border p-4 bg-card">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-                style={{ background: s.color + '20' }}>
-                <s.icon className="w-3.5 h-3.5" style={{ color: s.color }} />
+        {stats.map(s => {
+          const inner = (
+            <div className="rounded-xl border border-border p-4 bg-card hover:border-border/80 transition-colors">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ background: s.color + '20' }}>
+                  <s.icon className="w-3.5 h-3.5" style={{ color: s.color }} />
+                </div>
+                <span className="text-xs text-muted-foreground">{s.label}</span>
               </div>
-              <span className="text-xs text-muted-foreground">{s.label}</span>
+              <p className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Space Grotesk' }}>
+                {s.value}
+              </p>
             </div>
-            <p className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Space Grotesk' }}>
-              {s.value}
-            </p>
-          </div>
-        ))}
+          );
+          return 'href' in s && s.href ? (
+            <Link key={s.label} href={s.href}>{inner}</Link>
+          ) : inner;
+        })}
       </div>
+
+      {statsApi?.offers_per_site && statsApi.offers_per_site.length > 0 && (
+        <div>
+          <h2 className="text-base font-semibold text-foreground mb-4" style={{ fontFamily: 'Space Grotesk' }}>
+            Offres par site ({statsApi.period_days ?? 30} jours)
+          </h2>
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            {statsApi.offers_per_site.map(s => {
+              const max = Math.max(...statsApi.offers_per_site.map(x => x.count), 1);
+              const pct = Math.round((s.count / max) * 100);
+              return (
+                <div key={s.site_id} className="flex items-center gap-3 text-sm">
+                  <span className="w-36 truncate text-muted-foreground">{s.site_name}</span>
+                  <div className="flex-1 h-2 rounded-full bg-secondary overflow-hidden">
+                    <div className="h-full rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="w-8 text-right font-medium text-foreground">{s.count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Sites grid */}
       <div>

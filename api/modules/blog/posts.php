@@ -6,6 +6,8 @@
  * Filtres : status, category_id, is_featured, search. Pagination.
  */
 
+require_once __DIR__ . '/blog_helpers.php';
+
 function registerBlogPostsRoutes(Router $router): void
 {
     // ===== LISTE =====
@@ -113,24 +115,32 @@ function registerBlogPostsRoutes(Router $router): void
         $post['tags'] = $stmt->fetchAll();
 
         // Related posts
-        $stmt = $db->prepare(
-            'SELECT rp.id, rp.title, rp.slug, rp.cover_image_url 
-             FROM blog_posts rp 
-             INNER JOIN blog_related_posts brp ON rp.id = brp.related_post_id 
-             WHERE brp.post_id = :post_id AND rp.deleted_at IS NULL'
-        );
-        $stmt->bindParam(':post_id', $id, PDO::PARAM_INT);
-        $stmt->execute();
-        $post['related_posts'] = $stmt->fetchAll();
+        if (blogHasTable($db, 'blog_related_posts')) {
+            $stmt = $db->prepare(
+                'SELECT rp.id, rp.title, rp.slug, rp.cover_image_url 
+                 FROM blog_posts rp 
+                 INNER JOIN blog_related_posts brp ON rp.id = brp.related_post_id 
+                 WHERE brp.post_id = :post_id AND rp.deleted_at IS NULL'
+            );
+            $stmt->bindParam(':post_id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            $post['related_posts'] = $stmt->fetchAll();
+        } else {
+            $post['related_posts'] = [];
+        }
 
         // Versions
-        $stmt = $db->prepare(
-            'SELECT id, title, status, created_by, created_at 
-             FROM blog_posts_versions WHERE post_id = :post_id ORDER BY created_at DESC'
-        );
-        $stmt->bindParam(':post_id', $id, PDO::PARAM_INT);
-        $stmt->execute();
-        $post['versions'] = $stmt->fetchAll();
+        if (blogHasTable($db, 'blog_posts_versions')) {
+            $stmt = $db->prepare(
+                'SELECT id, title, status, created_by, created_at 
+                 FROM blog_posts_versions WHERE post_id = :post_id ORDER BY created_at DESC'
+            );
+            $stmt->bindParam(':post_id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            $post['versions'] = $stmt->fetchAll();
+        } else {
+            $post['versions'] = [];
+        }
 
         Response::success($post);
     });
@@ -148,46 +158,54 @@ function registerBlogPostsRoutes(Router $router): void
             ->validate();
 
         $slug = $data['slug'] ?? Validator::slugify($data['title']);
+        if ($slug === '') {
+            Response::badRequest('Slug invalide');
+            return;
+        }
+
         $db = getDb();
+
+        $slugCheck = $db->prepare(
+            'SELECT id FROM blog_posts WHERE site_id = :site_id AND slug = :slug AND deleted_at IS NULL LIMIT 1'
+        );
+        $slugCheck->bindValue(':site_id', $siteId, PDO::PARAM_INT);
+        $slugCheck->bindValue(':slug', $slug, PDO::PARAM_STR);
+        $slugCheck->execute();
+        if ($slugCheck->fetch()) {
+            Response::badRequest('Un article avec ce slug existe déjà pour ce site');
+            return;
+        }
 
         $db->beginTransaction();
         try {
-            $stmt = $db->prepare(
-                'INSERT INTO blog_posts 
-                 (site_id, category_id, author_id, title, slug, excerpt, content, cover_image_url, 
-                  read_time_mins, status, is_featured, published_at, meta_title, meta_description, views_count, created_at)
-                 VALUES 
-                 (:site_id, :category_id, :author_id, :title, :slug, :excerpt, :content, :cover_image_url,
-                  :read_time_mins, :status, :is_featured, :published_at, :meta_title, :meta_description, 0, NOW())'
-            );
-            $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-            $catId = $data['category_id'] ?? null;
-            $stmt->bindParam(':category_id', $catId, PDO::PARAM_INT);
-            $authId = $data['author_id'] ?? null;
-            $stmt->bindParam(':author_id', $authId, PDO::PARAM_INT);
-            $stmt->bindParam(':title', $data['title'], PDO::PARAM_STR);
-            $stmt->bindParam(':slug', $slug, PDO::PARAM_STR);
-            $excerpt = $data['excerpt'] ?? null;
-            $stmt->bindParam(':excerpt', $excerpt, PDO::PARAM_STR);
-            $content = $data['content'] ?? '';
-            $stmt->bindParam(':content', $content, PDO::PARAM_STR);
-            $cover = $data['cover_image_url'] ?? null;
-            $stmt->bindParam(':cover_image_url', $cover, PDO::PARAM_STR);
-            $readTime = $data['read_time_mins'] ?? null;
-            $stmt->bindParam(':read_time_mins', $readTime, PDO::PARAM_INT);
             $status = $data['status'] ?? 'draft';
-            $stmt->bindParam(':status', $status, PDO::PARAM_STR);
-            $isFeatured = (int) ($data['is_featured'] ?? 0);
-            $stmt->bindParam(':is_featured', $isFeatured, PDO::PARAM_INT);
             $publishedAt = ($status === 'published') ? date('Y-m-d H:i:s') : ($data['published_at'] ?? null);
-            $stmt->bindParam(':published_at', $publishedAt, PDO::PARAM_STR);
-            $metaTitle = $data['meta_title'] ?? null;
-            $stmt->bindParam(':meta_title', $metaTitle, PDO::PARAM_STR);
-            $metaDesc = $data['meta_description'] ?? null;
-            $stmt->bindParam(':meta_description', $metaDesc, PDO::PARAM_STR);
-            $stmt->execute();
 
-            $postId = (int) $db->lastInsertId();
+            $row = [
+                'site_id' => $siteId,
+                'category_id' => blogNormalizeOptionalInt($data['category_id'] ?? null),
+                'author_id' => blogNormalizeOptionalInt($data['author_id'] ?? null),
+                'title' => $data['title'],
+                'slug' => $slug,
+                'excerpt' => isset($data['excerpt']) ? (string) $data['excerpt'] : null,
+                'content' => $data['content'] ?? '',
+                'cover_image_url' => isset($data['cover_image_url']) ? (string) $data['cover_image_url'] : null,
+                'read_time_mins' => blogNormalizeOptionalInt($data['read_time_mins'] ?? null),
+                'status' => $status,
+                'is_featured' => (int) ($data['is_featured'] ?? 0),
+                'published_at' => $publishedAt !== null ? (string) $publishedAt : null,
+                'views_count' => 0,
+                'created_at' => date('Y-m-d H:i:s'),
+            ];
+
+            if (blogHasColumn($db, 'blog_posts', 'meta_title')) {
+                $row['meta_title'] = isset($data['meta_title']) ? (string) $data['meta_title'] : null;
+            }
+            if (blogHasColumn($db, 'blog_posts', 'meta_description')) {
+                $row['meta_description'] = isset($data['meta_description']) ? (string) $data['meta_description'] : null;
+            }
+
+            $postId = blogInsert($db, 'blog_posts', $row);
 
             // Tags pivot
             if (!empty($data['tag_ids']) && is_array($data['tag_ids'])) {
@@ -200,7 +218,9 @@ function registerBlogPostsRoutes(Router $router): void
             }
 
             // Related posts pivot
-            if (!empty($data['related_post_ids']) && is_array($data['related_post_ids'])) {
+            if (blogHasTable($db, 'blog_related_posts')
+                && !empty($data['related_post_ids'])
+                && is_array($data['related_post_ids'])) {
                 $stmtRel = $db->prepare('INSERT INTO blog_related_posts (post_id, related_post_id) VALUES (:post_id, :related_post_id)');
                 foreach ($data['related_post_ids'] as $relId) {
                     $stmtRel->bindValue(':post_id', $postId, PDO::PARAM_INT);
@@ -239,46 +259,46 @@ function registerBlogPostsRoutes(Router $router): void
 
         $db->beginTransaction();
         try {
-            // Créer une version (snapshot)
-            $stmt = $db->prepare(
-                'INSERT INTO blog_posts_versions (post_id, title, content, status, created_by, created_at) 
-                 VALUES (:post_id, :title, :content, :status, :created_by, NOW())'
-            );
-            $stmt->bindParam(':post_id', $id, PDO::PARAM_INT);
-            $stmt->bindParam(':title', $old['title'], PDO::PARAM_STR);
-            $stmt->bindParam(':content', $old['content'], PDO::PARAM_STR);
-            $stmt->bindParam(':status', $old['status'], PDO::PARAM_STR);
-            $stmt->bindParam(':created_by', $admin['id'], PDO::PARAM_INT);
-            $stmt->execute();
+            if (blogHasTable($db, 'blog_posts_versions')) {
+                blogInsert($db, 'blog_posts_versions', [
+                    'post_id' => $id,
+                    'title' => $old['title'],
+                    'content' => $old['content'],
+                    'status' => $old['status'],
+                    'created_by' => (int) $admin['id'],
+                    'created_at' => date('Y-m-d H:i:s'),
+                ]);
+            }
 
-            // Update fields
             $fields = [];
-            $bind = [];
-            $updatable = ['category_id', 'author_id', 'title', 'slug', 'excerpt', 'content', 
-                          'cover_image_url', 'read_time_mins', 'status', 'is_featured',
-                          'published_at', 'meta_title', 'meta_description'];
-            
-            foreach ($updatable as $f) {
+            foreach (['category_id', 'author_id', 'title', 'slug', 'excerpt', 'content',
+                'cover_image_url', 'read_time_mins', 'status', 'is_featured', 'published_at'] as $f) {
                 if (array_key_exists($f, $data)) {
-                    $fields[] = "$f = :$f";
-                    $bind[":$f"] = $data[$f];
+                    if (in_array($f, ['category_id', 'author_id', 'read_time_mins'], true)) {
+                        $fields[$f] = blogNormalizeOptionalInt($data[$f]);
+                    } elseif ($f === 'is_featured') {
+                        $fields[$f] = (int) $data[$f];
+                    } else {
+                        $fields[$f] = $data[$f];
+                    }
                 }
             }
 
-            // Auto-set published_at quand status passe à published
+            if (blogHasColumn($db, 'blog_posts', 'meta_title') && array_key_exists('meta_title', $data)) {
+                $fields['meta_title'] = $data['meta_title'];
+            }
+            if (blogHasColumn($db, 'blog_posts', 'meta_description') && array_key_exists('meta_description', $data)) {
+                $fields['meta_description'] = $data['meta_description'];
+            }
+
             if (isset($data['status']) && $data['status'] === 'published' && $old['status'] !== 'published') {
                 if (!isset($data['published_at'])) {
-                    $fields[] = "published_at = NOW()";
+                    $fields['published_at'] = date('Y-m-d H:i:s');
                 }
             }
 
             if (!empty($fields)) {
-                $fields[] = "updated_at = NOW()";
-                $sql = 'UPDATE blog_posts SET ' . implode(', ', $fields) . ' WHERE id = :id';
-                $stmt = $db->prepare($sql);
-                foreach ($bind as $k => $v) $stmt->bindValue($k, $v);
-                $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-                $stmt->execute();
+                blogUpdate($db, 'blog_posts', $fields, 'WHERE id = :id', [':id' => $id]);
             }
 
             // MAJ tags pivot
@@ -296,7 +316,7 @@ function registerBlogPostsRoutes(Router $router): void
             }
 
             // MAJ related posts pivot
-            if (isset($data['related_post_ids']) && is_array($data['related_post_ids'])) {
+            if (blogHasTable($db, 'blog_related_posts') && isset($data['related_post_ids']) && is_array($data['related_post_ids'])) {
                 $stmt = $db->prepare('DELETE FROM blog_related_posts WHERE post_id = :post_id');
                 $stmt->bindParam(':post_id', $id, PDO::PARAM_INT);
                 $stmt->execute();

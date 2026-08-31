@@ -1,7 +1,9 @@
 <?php
 /**
- * modules/recrutement/applications.php — CRUD candidatures (v2.1)
+ * modules/recrutement/applications.php — CRUD candidatures
  */
+
+require_once __DIR__ . '/site_scope.php';
 
 function registerRecrutementApplicationsRoutes(Router $router): void
 {
@@ -16,6 +18,11 @@ function registerRecrutementApplicationsRoutes(Router $router): void
         if ($status = Router::getQueryParam('statut')) {
             $where[] = 'c.statut = :statut';
             $params[':statut'] = $status;
+        }
+
+        if ($offreId = Router::getQueryParam('offre_id')) {
+            $where[] = 'c.offre_id = :offre_id';
+            $params[':offre_id'] = (int) $offreId;
         }
 
         $whereClause = 'WHERE ' . implode(' AND ', $where);
@@ -66,7 +73,7 @@ function registerRecrutementApplicationsRoutes(Router $router): void
         $stmtH = $db->prepare(
             'SELECT ch.*, au.email as auteur_admin_email
              FROM candidature_historique ch
-             LEFT JOIN core_admin_users au ON ch.auteur_admin_id = au.id
+             LEFT JOIN core_admin_users au ON ch.auteur_type = \'admin\' AND ch.auteur_id = au.id
              WHERE ch.candidature_id = :id ORDER BY ch.created_at DESC'
         );
         $stmtH->execute([':id' => $id]);
@@ -112,8 +119,12 @@ function registerRecrutementApplicationsRoutes(Router $router): void
         $id = (int) $params['id'];
 
         $stmt = $db->prepare(
-            'SELECT c.* FROM candidatures c
+            'SELECT c.*, o.site_id, o.titre as offre_titre,
+                    cand.prenom as candidat_prenom, cand.nom as candidat_nom, u.email as candidat_email
+             FROM candidatures c
              INNER JOIN offres_emploi o ON c.offre_id = o.id
+             INNER JOIN candidats cand ON c.candidat_id = cand.id
+             LEFT JOIN users u ON cand.user_id = u.id
              WHERE c.id = :id AND o.site_id = :site_id LIMIT 1'
         );
         $stmt->execute([':id' => $id, ':site_id' => $siteId]);
@@ -137,21 +148,36 @@ function registerRecrutementApplicationsRoutes(Router $router): void
         $stmtU->bindParam(':id', $id, PDO::PARAM_INT);
         $stmtU->execute();
 
+        $emailSent = null;
         if (isset($data['statut']) && $data['statut'] !== $old['statut']) {
             $stmtH = $db->prepare(
-                'INSERT INTO candidature_historique (candidature_id, ancien_statut, nouveau_statut, commentaire, auteur_admin_id, created_at)
-                 VALUES (:cid, :as, :ns, :com, :aid, NOW())'
+                'INSERT INTO candidature_historique (candidature_id, ancien_statut, nouveau_statut, commentaire, auteur_type, auteur_id, created_at)
+                 VALUES (:cid, :as, :ns, :com, :atype, :aid, NOW())'
             );
             $stmtH->execute([
                 ':cid' => $id,
                 ':as' => $old['statut'],
                 ':ns' => $data['statut'],
-                ':com' => $data['commentaire'] ?? 'Statut mis à jour',
+                ':com' => $data['commentaire'] ?? 'Statut mis a jour',
+                ':atype' => in_array($admin['role'], ['superadmin', 'admin']) ? 'admin' : 'recruteur',
                 ':aid' => $admin['id'],
             ]);
+
+            require_once __DIR__ . '/../../core/ActionNotify.php';
+            $emailSent = ActionNotify::candidatureStatusChanged(
+                $db,
+                $old,
+                (string) $old['statut'],
+                (string) $data['statut'],
+                isset($data['commentaire']) ? (string) $data['commentaire'] : null
+            );
         }
 
-        Audit::log((int) $admin['id'], $siteId, 'update', 'candidature', $id, $old, $data);
+        $auditData = $data;
+        if ($emailSent !== null) {
+            $auditData['email_sent'] = $emailSent;
+        }
+        Audit::log((int) $admin['id'], $siteId, 'update', 'candidature', $id, $old, $auditData);
         Response::success(['id' => $id], 'Candidature updated');
     });
 
@@ -162,8 +188,12 @@ function registerRecrutementApplicationsRoutes(Router $router): void
         $id = (int) $params['id'];
 
         $stmt = $db->prepare(
-            'SELECT c.* FROM candidatures c
+            'SELECT c.*, o.site_id, o.titre as offre_titre,
+                    cand.prenom as candidat_prenom, cand.nom as candidat_nom, u.email as candidat_email
+             FROM candidatures c
              INNER JOIN offres_emploi o ON c.offre_id = o.id
+             INNER JOIN candidats cand ON c.candidat_id = cand.id
+             LEFT JOIN users u ON cand.user_id = u.id
              WHERE c.id = :id AND o.site_id = :site_id LIMIT 1'
         );
         $stmt->execute([':id' => $id, ':site_id' => $siteId]);

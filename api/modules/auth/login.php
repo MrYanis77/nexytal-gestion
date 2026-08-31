@@ -63,18 +63,19 @@ function registerAuthLoginRoutes(Router $router): void
         $adminId = (int) $admin['id'];
         $ip = RateLimit::getClientIp();
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-
-        // Créer une session (schéma v2 : id=token | Ionos prod : colonne token + id auto)
         $expiresAt = date('Y-m-d H:i:s', time() + JWT_EXPIRY);
         $sessionId = AdminSession::create($db, $adminId, $ip, $userAgent, $expiresAt);
 
-        // Générer le JWT
-        $jwt = Auth::generateToken([
+        // Generer le JWT + jeton CSRF lie au jti
+        $jwtPayload = [
             'sub'        => $adminId,
             'email'      => $admin['email'],
             'role'       => $admin['role'],
             'session_id' => $sessionId,
-        ]);
+            'jti'        => bin2hex(random_bytes(16)),
+        ];
+        $jwt = Auth::generateToken($jwtPayload);
+        $csrfToken = Auth::generateCsrfToken($jwtPayload);
 
         // Mettre à jour last_login
         $stmt = $db->prepare('UPDATE core_admin_users SET last_login = NOW() WHERE id = :id');
@@ -103,6 +104,7 @@ function registerAuthLoginRoutes(Router $router): void
 
         Response::success([
             'token' => $jwt,
+            'csrf_token' => $csrfToken,
             'admin' => [
                 'id'         => $adminId,
                 'email'      => $admin['email'],

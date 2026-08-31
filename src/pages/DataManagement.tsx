@@ -187,7 +187,7 @@ export default function DataManagement() {
         )}
 
         {tab === 'subscriptions' && (
-          <DataTable<Record<string, unknown>>
+          <DataTable<any>
             data={subscriptionsData?.data ?? []}
             accentColor={COLOR}
             addLabel="Nouvel abonnement"
@@ -206,7 +206,7 @@ export default function DataManagement() {
         )}
 
         {tab === 'events' && (
-          <DataTable<Record<string, unknown>>
+          <DataTable<any>
             data={eventsData?.data ?? []}
             accentColor={COLOR}
             searchKeys={['event_type', 'subscriber_email', 'campaign_subject']}
@@ -220,7 +220,7 @@ export default function DataManagement() {
         )}
 
         {tab === 'emails' && (
-          <DataTable<Record<string, unknown>>
+          <DataTable<any>
             data={emailsData?.data ?? []}
             accentColor={COLOR}
             addLabel="Nouveau log"
@@ -235,7 +235,7 @@ export default function DataManagement() {
         )}
 
         {tab === 'seo' && (
-          <DataTable<Record<string, unknown>>
+          <DataTable<any>
             data={seoData?.data ?? []}
             accentColor={COLOR}
             addLabel="Nouvelle entrée SEO"
@@ -250,7 +250,7 @@ export default function DataManagement() {
         )}
 
         {tab === 'gdpr_consents' && (
-          <DataTable<Record<string, unknown>>
+          <DataTable<any>
             data={consentsData?.data ?? []}
             accentColor={COLOR}
             searchKeys={['user_email', 'consent_type']}
@@ -264,7 +264,7 @@ export default function DataManagement() {
         )}
 
         {tab === 'gdpr_deletion_requests' && (
-          <DataTable<Record<string, unknown>>
+          <DataTable<any>
             data={deletionsData?.data ?? []}
             accentColor={COLOR}
             onEdit={item => setModal({ type: 'deletion', item })}

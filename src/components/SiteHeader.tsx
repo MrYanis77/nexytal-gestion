@@ -23,6 +23,8 @@ interface SiteHeaderProps {
   tabGroups?: TabGroup[];
   activeGroup?: string;
   onGroupChange?: (groupKey: string) => void;
+  /** Masque le bloc titre/icône — onglets uniquement (module embarqué) */
+  compact?: boolean;
 }
 
 export function SiteHeader({
@@ -36,13 +38,15 @@ export function SiteHeader({
   tabGroups,
   activeGroup,
   onGroupChange,
+  compact = false,
 }: SiteHeaderProps) {
   const visibleTabs = tabGroups
     ? tabGroups.find(g => g.key === activeGroup)?.tabs ?? tabGroups[0]?.tabs ?? []
     : tabs ?? [];
 
   return (
-    <div className="border-b border-border bg-card/50 px-6 pt-6 pb-0">
+    <div className={`border-b border-border bg-card/50 px-6 pb-0 ${compact ? 'pt-3' : 'pt-6'}`}>
+      {!compact && (
       <div className="flex items-center gap-3 mb-4">
         <div
           className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -55,6 +59,7 @@ export function SiteHeader({
           <p className="text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
+      )}
 
       {tabGroups && tabGroups.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
@@ -76,7 +81,7 @@ export function SiteHeader({
         </div>
       )}
 
-      {visibleTabs.length > 0 && (
+      {visibleTabs.length > 1 && (
         <div className="flex gap-1 overflow-x-auto pb-px">
           {visibleTabs.map(tab => (
             <button

@@ -61,23 +61,40 @@ function registerMarketingNewsletterRoutes(Router $router): void
                 Response::success(null, 'Already subscribed');
                 return;
             }
-            $db->prepare(
-                "UPDATE newsletter_subscribers SET status = 'active', unsubscribed_at = NULL, rgpd_consent_at = NOW() WHERE id = :id"
-            )->execute([':id' => $existing['id']]);
+            $resubFields = ["status = 'active'", 'rgpd_consent_at = NOW()'];
+            if (dbTableHasColumn($db, 'newsletter_subscribers', 'unsubscribed_at')) {
+                $resubFields[] = 'unsubscribed_at = NULL';
+            }
+            $db->prepare('UPDATE newsletter_subscribers SET ' . implode(', ', $resubFields) . ' WHERE id = :id')
+                ->execute([':id' => $existing['id']]);
             Response::success(null, 'Resubscribed successfully');
             return;
         }
 
-        $stmt = $db->prepare(
-            "INSERT INTO newsletter_subscribers (site_id, email, first_name, last_name, status, rgpd_consent_at, source, created_at)
-             VALUES (:site_id, :email, :fn, :ln, 'active', NOW(), 'form', NOW())"
-        );
-        $stmt->execute([
+        $cols = ['site_id', 'email', 'first_name', 'status', 'rgpd_consent_at', 'created_at'];
+        $vals = [':site_id', ':email', ':fn', "'active'", 'NOW()', 'NOW()'];
+        $bind = [
             ':site_id' => $siteId,
             ':email' => $data['email'],
             ':fn' => $data['first_name'] ?? null,
-            ':ln' => $data['last_name'] ?? null,
-        ]);
+        ];
+        if (dbTableHasColumn($db, 'newsletter_subscribers', 'last_name')) {
+            $cols[] = 'last_name';
+            $vals[] = ':ln';
+            $bind[':ln'] = $data['last_name'] ?? null;
+        }
+        if (dbTableHasColumn($db, 'newsletter_subscribers', 'rgpd_consent_ip')) {
+            $cols[] = 'rgpd_consent_ip';
+            $vals[] = ':ip';
+            $bind[':ip'] = $_SERVER['REMOTE_ADDR'] ?? null;
+        }
+        if (dbTableHasColumn($db, 'newsletter_subscribers', 'source')) {
+            $cols[] = 'source';
+            $vals[] = "'form'";
+        }
+
+        $stmt = $db->prepare('INSERT INTO newsletter_subscribers (' . implode(', ', $cols) . ') VALUES (' . implode(', ', $vals) . ')');
+        $stmt->execute($bind);
 
         Response::created(['id' => (int) $db->lastInsertId()], 'Subscribed successfully');
     });
@@ -91,7 +108,7 @@ function registerMarketingNewsletterRoutes(Router $router): void
 
         $db = getDb();
         $stmt = $db->prepare(
-            "UPDATE newsletter_subscribers SET status = 'unsubscribed', unsubscribed_at = NOW() WHERE email = :email AND site_id = :site_id"
+            "UPDATE newsletter_subscribers SET status = 'unsubscribed' WHERE email = :email AND site_id = :site_id"
         );
         $stmt->execute([':email' => $data['email'], ':site_id' => $siteId]);
 

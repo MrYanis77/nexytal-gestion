@@ -14,12 +14,12 @@ import { toast } from 'sonner';
 import { FileUploadField } from '@/components/FileUploadField';
 import type { UploadFileKind } from '@/lib/upload';
 
-export type ModuleListItem = { title: string; description: string };
+export type ModuleListItem = { title: string; description: string; duration?: string };
 
 export interface FieldDef {
   key: string;
   label: string;
-  type: 'text' | 'textarea' | 'select' | 'multi_select' | 'switch' | 'number' | 'date' | 'email' | 'module_list' | 'file';
+  type: 'text' | 'textarea' | 'select' | 'multi_select' | 'switch' | 'number' | 'date' | 'email' | 'module_list' | 'file' | 'link';
   /** Pour type file : image, vidéo ou document */
   fileKind?: UploadFileKind;
   /** Sous-dossier d'upload côté API (trainers, formation, blog…) */
@@ -31,6 +31,10 @@ export interface FieldDef {
   /** Titre de section affiché avant ce champ */
   section?: string;
   hint?: string;
+  /** Champs affichés après clic sur un lien du même groupe */
+  toggleGroup?: string;
+  /** module_list : variante FAQ (question / réponse, sans durée) */
+  moduleListMode?: 'default' | 'faq';
 }
 
 interface FormModalProps {
@@ -42,14 +46,20 @@ interface FormModalProps {
   initialData?: Record<string, unknown>;
   accentColor?: string;
   wide?: boolean;
+  /** Boutons additionnels à gauche du footer (ex. Publier / Refuser) */
+  footerExtra?: ReactNode;
+  /** site_id pour l'upload média (prioritaire sur la détection par URL) */
+  siteId?: string;
 }
 
-export function FormModal({ open, onClose, onSave, title, fields, initialData, accentColor = '#2563EB', wide }: FormModalProps) {
+export function FormModal({ open, onClose, onSave, title, fields, initialData, accentColor = '#2563EB', wide, footerExtra, siteId }: FormModalProps) {
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
+  const [expandedToggleGroups, setExpandedToggleGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (open) {
+      setExpandedToggleGroups(new Set());
       const defaults: Record<string, unknown> = {};
       fields.forEach(f => {
         if (f.type === 'switch') {
@@ -76,8 +86,9 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
             ? init.map(m => ({
                 title: String((m as ModuleListItem).title ?? ''),
                 description: String((m as ModuleListItem).description ?? ''),
+                duration: String((m as ModuleListItem).duration ?? ''),
               }))
-            : [{ title: '', description: '' }];
+            : [{ title: '', description: '', duration: '' }];
         } else if (f.type === 'file') {
           defaults[f.key] = initialData?.[f.key] ?? '';
         } else {
@@ -146,14 +157,14 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
   const addModuleListItem = (key: string) => {
     setForm(p => ({
       ...p,
-      [key]: [...((p[key] as ModuleListItem[]) ?? []), { title: '', description: '' }],
+      [key]: [...((p[key] as ModuleListItem[]) ?? []), { title: '', description: '', duration: '' }],
     }));
   };
 
   const removeModuleListItem = (key: string, index: number) => {
     setForm(p => {
       const list = [...((p[key] as ModuleListItem[]) ?? [])];
-      if (list.length <= 1) return { ...p, [key]: [{ title: '', description: '' }] };
+      if (list.length <= 1) return { ...p, [key]: [{ title: '', description: '', duration: '' }] };
       list.splice(index, 1);
       return { ...p, [key]: list };
     });
@@ -168,6 +179,10 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
           {fields.flatMap((f, idx) => {
+            if (f.toggleGroup && f.type !== 'link' && !expandedToggleGroups.has(f.toggleGroup)) {
+              return [];
+            }
+
             const showSection = f.section && (idx === 0 || fields[idx - 1]?.section !== f.section);
             const nodes: ReactNode[] = [];
             if (showSection) {
@@ -179,8 +194,26 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
             }
             nodes.push(
             <div key={f.key} className={f.span ? 'sm:col-span-2' : ''}>
-              <Label className="text-sm text-foreground/80 mb-1.5 block">{f.label}{f.required && <span className="text-destructive ml-1">*</span>}</Label>
-              {f.hint && <p className="text-xs text-muted-foreground mb-1.5">{f.hint}</p>}
+              {f.type !== 'link' && (
+                <Label className="text-sm text-foreground/80 mb-1.5 block">{f.label}{f.required && <span className="text-destructive ml-1">*</span>}</Label>
+              )}
+              {f.hint && f.type !== 'link' && <p className="text-xs text-muted-foreground mb-1.5">{f.hint}</p>}
+
+              {f.type === 'link' && f.toggleGroup && (
+                <button
+                  type="button"
+                  className="text-sm font-medium underline-offset-2 hover:underline"
+                  style={{ color: accentColor }}
+                  onClick={() => setExpandedToggleGroups(prev => {
+                    const next = new Set(prev);
+                    if (next.has(f.toggleGroup!)) next.delete(f.toggleGroup!);
+                    else next.add(f.toggleGroup!);
+                    return next;
+                  })}
+                >
+                  {expandedToggleGroups.has(f.toggleGroup) ? 'Masquer le formulaire auteur' : f.label}
+                </button>
+              )}
 
               {f.type === 'textarea' && (
                 <Textarea
@@ -198,6 +231,7 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
                   type={f.type}
                   value={String(form[f.key] ?? '')}
                   onChange={e => set(f.key, e.target.value)}
+                  onWheel={f.type === 'number' ? (e) => e.currentTarget.blur() : undefined}
                   placeholder={f.placeholder}
                   className="bg-secondary border-border text-foreground placeholder:text-muted-foreground/50 h-9"
                 />
@@ -284,7 +318,9 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
                   {((form[f.key] as ModuleListItem[]) ?? []).map((mod, modIdx) => (
                     <div key={modIdx} className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">Module {modIdx + 1}</span>
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {f.moduleListMode === 'faq' ? `Question ${modIdx + 1}` : `Module ${modIdx + 1}`}
+                        </span>
                         <Button
                           type="button"
                           variant="ghost"
@@ -298,13 +334,21 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
                       <Input
                         value={mod.title}
                         onChange={e => updateModuleList(f.key, modIdx, 'title', e.target.value)}
-                        placeholder="Nom du module"
+                        placeholder={f.moduleListMode === 'faq' ? 'Question fréquente…' : 'Nom du module'}
                         className="bg-secondary border-border text-foreground h-9"
                       />
+                      {f.moduleListMode !== 'faq' && (
+                        <Input
+                          value={mod.duration ?? ''}
+                          onChange={e => updateModuleList(f.key, modIdx, 'duration', e.target.value)}
+                          placeholder="Durée (ex. 6 semaines)"
+                          className="bg-secondary border-border text-foreground h-9"
+                        />
+                      )}
                       <Textarea
                         value={mod.description}
                         onChange={e => updateModuleList(f.key, modIdx, 'description', e.target.value)}
-                        placeholder="Contenu et détails du module…"
+                        placeholder={f.moduleListMode === 'faq' ? 'Réponse…' : 'Contenu et détails du module…'}
                         className="bg-secondary border-border text-foreground placeholder:text-muted-foreground/50 min-h-[88px] resize-y"
                       />
                     </div>
@@ -317,7 +361,7 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
                     onClick={() => addModuleListItem(f.key)}
                   >
                     <Plus className="h-4 w-4 mr-1.5" />
-                    Ajouter un module
+                    {f.moduleListMode === 'faq' ? 'Ajouter une question' : 'Ajouter un module'}
                   </Button>
                 </div>
               )}
@@ -328,6 +372,7 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
                   onChange={url => set(f.key, url)}
                   fileKind={f.fileKind ?? 'image'}
                   uploadContext={f.uploadContext}
+                  siteId={siteId}
                   placeholder={f.placeholder}
                 />
               )}
@@ -337,11 +382,14 @@ export function FormModal({ open, onClose, onSave, title, fields, initialData, a
           })}
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 sm:justify-between">
+          <div className="flex flex-wrap gap-2">{footerExtra}</div>
+          <div className="flex gap-2">
           <Button variant="outline" onClick={onClose} className="border-border" disabled={saving}>Annuler</Button>
           <Button onClick={handleSave} style={{ background: accentColor }} disabled={saving}>
             {saving ? 'Enregistrement…' : 'Enregistrer'}
           </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,10 +1,12 @@
 const BASE = 'https://connexion.nexytal.com';
 const EMAIL = process.env.TEST_EMAIL || 'admin@nexytal.com';
 const PASSWORD = process.env.TEST_PASSWORD || 'password';
+let csrfToken = null;
 
 async function req(method, path, { token, siteId, body } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (token && csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) headers['X-CSRF-Token'] = csrfToken;
   if (siteId) headers['X-Site-Id'] = String(siteId);
   const res = await fetch(`${BASE}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, data: await res.json().catch(() => ({})) };
@@ -13,6 +15,7 @@ async function req(method, path, { token, siteId, body } = {}) {
 async function main() {
   const login = await req('POST', '/api/admin/login', { body: { email: EMAIL, password: PASSWORD } });
   const token = login.data?.data?.token;
+  csrfToken = login.data?.data?.csrf_token || null;
   console.log('Login:', login.status, login.data?.message || login.data?.error);
 
   const checks = [

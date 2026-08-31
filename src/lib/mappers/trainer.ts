@@ -29,6 +29,10 @@ export function trainerDetailFromApi(row: Record<string, unknown>): Record<strin
   const expertises = row.expertises
     ? (row.expertises as Array<{ id?: number; label: string }>)
     : [];
+  const expertiseLabels = String(row.expertise_labels ?? '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 
   const { prenom, nom, nomComplet } = trainerIdentityFromRow(row);
   const tjmRaw = row.tjm_eur ?? row.tjm;
@@ -50,7 +54,12 @@ export function trainerDetailFromApi(row: Record<string, unknown>): Record<strin
     city_id: row.city_id != null ? String(row.city_id) : '',
     region: String(row.city_name ?? row.region ?? ''),
     experience_years: experienceRaw != null ? String(experienceRaw) : '0',
-    expertise: expertises.map(e => e.label),
+    expertise: expertises.length > 0
+      ? expertises.map(e => e.label)
+      : expertiseLabels,
+    expertise_display: expertises.length > 0
+      ? expertises.map(e => e.label).join(', ')
+      : expertiseLabels.join(', '),
     expertise_ids: expertises.map(e => String(e.id ?? '')).filter(Boolean).join(','),
     primary_expertise_id: row.primary_expertise_id != null ? String(row.primary_expertise_id) : '',
     tjm: tjmRaw != null && tjmRaw !== '' ? String(tjmRaw) : '',
@@ -77,6 +86,7 @@ export function trainerDetailFromApi(row: Record<string, unknown>): Record<strin
       ? (row.certifications as Array<{ id: number }>).map(c => String(c.id)).join(',')
       : '',
     createdAt: String(row.created_at ?? ''),
+    on_catalog: row.on_catalog === 1 || row.on_catalog === true || (row.status === 'active' && row.validated_at != null),
   };
 }
 
@@ -102,10 +112,9 @@ export function trainerToApi(raw: Record<string, unknown>) {
     avatar_url: raw.photo || raw.avatar_url || null,
     experience_years: raw.experience_years ? Number(raw.experience_years) : 0,
     tjm_eur: raw.tjm ? Number(raw.tjm) : null,
-    availability: (raw.availability as string) || (raw.disponibilite ? 'available' : 'available'),
     legal_status: raw.legal_status || null,
     linkedin_url: raw.linkedin_url || null,
-    status: trainerStatusToApi(raw.statut),
+    status: trainerStatusToApi(raw.statut) || 'pending_review',
     is_featured: raw.is_featured ? 1 : 0,
     qualiopi_eligible: raw.qualiopi_eligible ? 1 : 0,
     bio: raw.bio || null,
@@ -168,11 +177,99 @@ function trainerStatusToApi(statut: unknown): string {
     inactif: 'inactive',
     en_attente: 'pending_review',
   };
-  return typeof statut === 'string' && statut in map ? map[statut] : 'active';
+  return typeof statut === 'string' && statut in map ? map[statut] : 'pending_review';
+}
+
+function linesFromStringArray(val: unknown): string {
+  if (!Array.isArray(val)) return '';
+  return val.map(v => String(v).trim()).filter(Boolean).join('\n');
+}
+
+function stringArrayFromLines(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map(v => String(v).trim()).filter(Boolean);
+  }
+  if (typeof raw !== 'string') return [];
+  return raw
+    .split(/\r?\n/)
+    .flatMap(line => line.split(','))
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function faqListFromApi(val: unknown): Array<{ title: string; description: string; duration?: string }> {
+  if (!Array.isArray(val) || val.length === 0) {
+    return [{ title: '', description: '', duration: '' }];
+  }
+  return val.map(item => {
+    const o = item as { q?: string; a?: string; title?: string; description?: string };
+    return {
+      title: String(o.q ?? o.title ?? ''),
+      description: String(o.a ?? o.description ?? ''),
+      duration: '',
+    };
+  });
+}
+
+function faqListToApi(raw: unknown): Array<{ q: string; a: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(item => {
+      const o = item as { title?: string; description?: string; q?: string; a?: string };
+      const q = String(o.title ?? o.q ?? '').trim();
+      const a = String(o.description ?? o.a ?? '').trim();
+      if (!q && !a) return null;
+      return { q, a };
+    })
+    .filter((x): x is { q: string; a: string } => x !== null);
+}
+
+export function expertiseFromApi(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id != null ? String(row.id) : '',
+    slug: String(row.slug ?? ''),
+    label: String(row.label ?? ''),
+    name: String(row.name ?? ''),
+    subtitle: String(row.subtitle ?? ''),
+    description: String(row.description ?? ''),
+    icon: String(row.icon ?? ''),
+    sort_order: row.sort_order != null ? String(row.sort_order) : '0',
+    is_active: row.is_active !== 0 && row.is_active !== false,
+    skills_lines: linesFromStringArray(row.skills_json),
+    certifications_lines: linesFromStringArray(row.certifications_json),
+    faq_list: faqListFromApi(row.faq_json),
+    trainers_count: row.trainers_count ?? 0,
+  };
+}
+
+function slugifyExpertiseLabel(label: string): string {
+  return label
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 export function expertiseToApi(raw: Record<string, unknown>) {
-  return { label: raw.label ?? raw.name };
+  const label = String(raw.label ?? raw.name ?? '').trim();
+  const slug = String(raw.slug ?? '').trim() || (label ? slugifyExpertiseLabel(label) : '');
+
+  const payload: Record<string, unknown> = {
+    site_id: 5,
+    label,
+    slug,
+    name: raw.name || label || null,
+    subtitle: raw.subtitle || null,
+    description: raw.description || null,
+    icon: raw.icon || null,
+    sort_order: raw.sort_order != null ? Number(raw.sort_order) : 0,
+    is_active: raw.is_active !== false && raw.is_active !== 0 ? 1 : 0,
+    skills_json: stringArrayFromLines(raw.skills_lines),
+    certifications_json: stringArrayFromLines(raw.certifications_lines),
+    faq_json: faqListToApi(raw.faq_list),
+  };
+  return payload;
 }
 
 export function buildTrainerFields(
@@ -217,7 +314,9 @@ export function buildTrainerFields(
           { key: 'expertise_ids', label: 'Spécialités', type: 'multi_select' as const, options: expertiseOptions, span: true, section: 'Spécialités & compétences', hint: 'Sélectionnez une ou plusieurs spécialités affichées sur le site' },
           { key: 'primary_expertise_id', label: 'Spécialité principale', type: 'select' as const, options: expertiseOptions },
         ]
-      : []),
+      : [
+          { key: 'expertise_ids', label: 'Spécialités', type: 'text' as const, span: true, section: 'Spécialités & compétences', hint: 'Aucune spécialité dans le référentiel — onglet Référentiels > Spécialités', placeholder: 'Ajoutez des spécialités dans Référentiels' },
+        ]),
     ...(skillOptions.length
       ? [{ key: 'skill_ids', label: 'Compétences techniques', type: 'multi_select' as const, options: skillOptions, span: true, hint: 'Compétences visibles sur la fiche formateur' }]
       : []),
@@ -232,10 +331,11 @@ export function buildTrainerFields(
     { key: 'is_featured', label: 'Mettre en avant sur le site', type: 'switch', section: 'Publication' },
     { key: 'qualiopi_eligible', label: 'Éligible Qualiopi', type: 'switch' },
     {
-      key: 'statut', label: 'Profil visible', type: 'select',
+      key: 'statut', label: 'Statut', type: 'select',
       options: [
-        { value: 'actif', label: 'Oui' },
-        { value: 'inactif', label: 'Non' },
+        { value: 'actif', label: 'Actif (publié)' },
+        { value: 'en_attente', label: 'En revue' },
+        { value: 'inactif', label: 'Inactif' },
       ],
     },
   ];
@@ -250,9 +350,7 @@ export function buildTrainerSkillFields(): import('@/components/FormModal').Fiel
 export function buildTrainerCityFields(): import('@/components/FormModal').FieldDef[] {
   return [
     { key: 'name', label: 'Ville', type: 'text', required: true },
-    { key: 'region', label: 'Région', type: 'text', required: true },
-    { key: 'description', label: 'Description', type: 'textarea', span: true },
-    { key: 'is_active', label: 'Visible sur le site', type: 'switch' },
+    { key: 'region', label: 'Région', type: 'text' },
   ];
 }
 
@@ -282,8 +380,51 @@ export function buildTrainerReviewFields(
 }
 
 export function buildExpertiseFields(): import('@/components/FormModal').FieldDef[] {
+  const iconOptions = [
+    { value: 'brain', label: 'IA (brain)' },
+    { value: 'shield', label: 'Cybersécurité (shield)' },
+    { value: 'cloud', label: 'Cloud' },
+    { value: 'code2', label: 'Développement (code2)' },
+    { value: 'bar-chart3', label: 'Data (bar-chart3)' },
+    { value: 'briefcase', label: 'RH (briefcase)' },
+    { value: 'users', label: 'Management (users)' },
+    { value: 'globe', label: 'Bureautique (globe)' },
+  ];
+
   return [
-    { key: 'label', label: 'Nom de la spécialité', type: 'text', required: true, span: true },
+    { key: 'label', label: 'Titre affiché', type: 'text', required: true, span: true, section: 'Identité', hint: 'Ex. Formateur IA — page SEO sur trainer.nexytal.com' },
+    { key: 'name', label: 'Nom court (menu)', type: 'text', hint: 'Ex. IA' },
+    { key: 'slug', label: 'Slug URL', type: 'text', hint: 'Laisser vide = généré automatiquement (ex. formateur-ia → ia)' },
+    { key: 'subtitle', label: 'Sous-titre', type: 'text', span: true },
+    { key: 'icon', label: 'Icône', type: 'select', options: iconOptions, section: 'Présentation' },
+    { key: 'sort_order', label: 'Ordre menu', type: 'number' },
+    { key: 'description', label: 'Description SEO', type: 'textarea', span: true },
+    {
+      key: 'skills_lines',
+      label: 'Compétences',
+      type: 'textarea',
+      span: true,
+      section: 'Contenu catalogue',
+      hint: 'Une compétence par ligne (ex. Machine Learning)',
+      placeholder: 'Machine Learning\nPython\nDeep Learning',
+    },
+    {
+      key: 'certifications_lines',
+      label: 'Certifications',
+      type: 'textarea',
+      span: true,
+      hint: 'Une certification par ligne',
+      placeholder: 'CISSP\nCEH\nISO 27001',
+    },
+    {
+      key: 'faq_list',
+      label: 'FAQ',
+      type: 'module_list',
+      moduleListMode: 'faq',
+      span: true,
+      hint: 'Questions fréquentes affichées sur la page expertise',
+    },
+    { key: 'is_active', label: 'Active (visible sur le site)', type: 'switch', section: 'Publication' },
   ];
 }
 

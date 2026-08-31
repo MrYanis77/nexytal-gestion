@@ -2,13 +2,68 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
+/** Routes recrutement globales — pas de X-Site-Id imposé par défaut */
+const GLOBAL_RECRUTEMENT_API = /\/recrutement\/(?:offers\/pending|offers\/\d+\/(?:publish|reject|candidatures)|stats|recruteurs(?:\/pending-count)?|candidatures(?:\/\d+\/verify)?|externes(?:\/\d+\/verify|\/unverified-count)?(?:\?|$))/;
+
+/** Routes coaching globales (file validation hub) */
+const GLOBAL_COACHING_API = /\/coaching\/coaches(?:\/pending(?:-count)?|\/?\d+\/(?:publish|reject))(?:\?|$)/;
+
+/** Routes trainer globales (file validation hub) */
+const GLOBAL_TRAINER_API = /\/trainer\/trainers(?:\/pending(?:-count)?|\/?\d+\/(?:publish|reject))(?:\?|$)/;
+
+const HUB_ADMIN_PATHS = [
+  '/recrutement-gestion',
+  '/validation-offres',
+  '/offres-publiees',
+  '/config-scoring',
+  '/validation-recruteurs',
+  '/qualification-candidatures',
+  '/validation-coaches',
+  '/validation-trainers',
+];
+
 export const api = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
   },
   withCredentials: true,
 });
+
+/** Télécharge un fichier protégé (CV, lettre) depuis l'espace recruteur. */
+export async function downloadPortalAttachment(apiPath: string, fallbackName: string): Promise<void> {
+  const token = localStorage.getItem('nexytal_token');
+  const normalized = apiPath.startsWith('/admin') ? apiPath : `/admin${apiPath.startsWith('/') ? '' : '/'}${apiPath}`;
+  const res = await fetch(`${API_URL}${normalized}`, {
+    method: 'GET',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    let message = `Téléchargement impossible (${res.status})`;
+    try {
+      const json = await res.json();
+      if (typeof json?.error === 'string') message = json.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = match?.[1] ?? fallbackName;
+
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+}
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('nexytal_token');
@@ -16,15 +71,29 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
+  const method = (config.method || 'get').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrfToken = localStorage.getItem('nexytal_csrf_token');
+    if (csrfToken) {
+      config.headers['X-CSRF-Token'] = csrfToken;
+    }
+    config.headers['X-Requested-With'] = 'XMLHttpRequest';
+  }
+
+  const requestUrl = config.url || '';
   let siteId = '';
-  
+  let urlSearchSite = '';
+
   try {
-    const urlObj = new URL(config.url || '', 'http://localhost');
-    siteId = urlObj.searchParams.get('site') || '';
-  } catch (e) {}
+    const urlObj = new URL(requestUrl, 'http://localhost');
+    siteId = urlObj.searchParams.get('site_id') || urlObj.searchParams.get('site') || '';
+    urlSearchSite = urlObj.searchParams.get('site') || urlObj.searchParams.get('site_id') || '';
+  } catch {
+    // ignore
+  }
 
   if (!siteId && config.data && typeof config.data === 'object' && config.data.site) {
-    siteId = config.data.site;
+    siteId = String(config.data.site);
   }
 
   if (siteId === 'formation' || siteId === 'alt-formation') siteId = '1';
@@ -34,10 +103,19 @@ api.interceptors.request.use((config) => {
   else if (siteId === 'trainer' || siteId === 'nexytal-trainer') siteId = '5';
   else if (siteId === 'coaching' || siteId === 'nexytal-coaching') siteId = '6';
 
-  // Page courante en priorité : medical/trainer partagent des routes /recrutement/…
+  const isGlobalRecrutementApi = GLOBAL_RECRUTEMENT_API.test(requestUrl);
+  const isGlobalCoachingApi = GLOBAL_COACHING_API.test(requestUrl);
+  const isGlobalTrainerApi = GLOBAL_TRAINER_API.test(requestUrl);
+  const isGlobalApi = isGlobalRecrutementApi || isGlobalCoachingApi || isGlobalTrainerApi;
+  const isHubAdminPage = typeof window !== 'undefined'
+    && HUB_ADMIN_PATHS.some(p => window.location.pathname.includes(p));
+
   if (!siteId && typeof window !== 'undefined') {
     const path = window.location.pathname;
-    if (path.includes('/formation')) siteId = '1';
+    const pageSearch = new URLSearchParams(window.location.search);
+    if (isHubAdminPage) {
+      siteId = pageSearch.get('site') || urlSearchSite || '';
+    } else if (path.includes('/formation')) siteId = '1';
     else if (path.includes('/medical')) siteId = '3';
     else if (path.includes('/recrutement')) siteId = '2';
     else if (path.includes('/carriere')) siteId = '4';
@@ -45,11 +123,12 @@ api.interceptors.request.use((config) => {
     else if (path.includes('/coaching')) siteId = '6';
   }
 
-  if (!siteId && config.url) {
-    if (config.url.includes('/formation/')) siteId = '1';
-    else if (config.url.includes('/recrutement/')) siteId = '2';
-    else if (config.url.includes('/coaching/')) siteId = '6';
-    else if (config.url.includes('/trainer/')) siteId = '5';
+  if (!siteId && requestUrl && !isGlobalApi && !(isHubAdminPage && !urlSearchSite)) {
+    if (requestUrl.includes('/formation/')) siteId = '1';
+    else if (requestUrl.includes('/recrutement/')) siteId = '2';
+    else if (requestUrl.includes('/carriere/')) siteId = '4';
+    else if (requestUrl.includes('/coaching/')) siteId = '6';
+    else if (requestUrl.includes('/trainer/')) siteId = '5';
   }
 
   if (siteId) {
@@ -68,6 +147,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('nexytal_token');
+      localStorage.removeItem('nexytal_csrf_token');
       delete api.defaults.headers.common['Authorization'];
     }
     return Promise.reject(error);

@@ -25,6 +25,9 @@ class Auth
         $payload['iss'] = JWT_ISSUER;
         $payload['iat'] = time();
         $payload['exp'] = time() + JWT_EXPIRY;
+        if (!isset($payload['jti'])) {
+            $payload['jti'] = bin2hex(random_bytes(16));
+        }
 
         // Encoder header et payload
         $headerEncoded = self::base64UrlEncode(json_encode($header));
@@ -81,6 +84,66 @@ class Auth
         return $payload;
     }
 
+    /**
+     * Genere un jeton CSRF lie au JWT courant.
+     */
+    public static function generateCsrfToken(array $payload): string
+    {
+        $nonce = (string) ($payload['jti'] ?? $payload['session_id'] ?? '');
+        $subject = (string) ($payload['sub'] ?? '');
+
+        if ($nonce === '' || $subject === '') {
+            return '';
+        }
+
+        return hash_hmac('sha256', $subject . '|' . $nonce . '|csrf', JWT_SECRET);
+    }
+
+    /**
+     * Extrait le jeton CSRF depuis les headers HTTP.
+     */
+    public static function extractCsrfToken(): ?string
+    {
+        $token = $_SERVER['HTTP_X_CSRF_TOKEN']
+            ?? $_SERVER['REDIRECT_HTTP_X_CSRF_TOKEN']
+            ?? null;
+
+        if ($token === null) {
+            $headers = [];
+            if (function_exists('getallheaders')) {
+                $headers = getallheaders() ?: [];
+            } elseif (function_exists('apache_request_headers')) {
+                $headers = apache_request_headers() ?: [];
+            }
+
+            foreach ($headers as $name => $value) {
+                if (strcasecmp((string) $name, 'X-CSRF-Token') === 0) {
+                    $token = $value;
+                    break;
+                }
+            }
+        }
+
+        if (!is_string($token)) {
+            return null;
+        }
+
+        $token = trim($token);
+        return $token !== '' ? $token : null;
+    }
+
+    /**
+     * Verifie le jeton CSRF associe au JWT.
+     */
+    public static function verifyCsrfToken(array $payload, ?string $token): bool
+    {
+        $expected = self::generateCsrfToken($payload);
+        if ($expected === '' || $token === null || $token === '') {
+            return false;
+        }
+
+        return hash_equals($expected, $token);
+    }
     /**
      * Extrait le token du header Authorization
      * Format attendu : "Bearer <token>"

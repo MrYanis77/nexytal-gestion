@@ -3,15 +3,17 @@
  * modules/blog/authors.php — CRUD blog_authors (admin, filtré par site_id)
  */
 
+require_once __DIR__ . '/blog_helpers.php';
+
 function registerBlogAuthorsRoutes(Router $router): void
 {
     $router->get('/api/admin/blog/authors', function () {
         $siteId = Middleware::requireSiteIdFromRequest();
         $db = getDb();
+        $cols = blogAuthorsSelectSql($db);
 
         $stmt = $db->prepare(
-            'SELECT id, site_id, first_name, last_name, email, slug, bio, avatar_url, is_active, created_at 
-             FROM blog_authors WHERE site_id = :site_id ORDER BY last_name ASC'
+            "SELECT {$cols} FROM blog_authors WHERE site_id = :site_id ORDER BY last_name ASC"
         );
         $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
         $stmt->execute();
@@ -34,26 +36,29 @@ function registerBlogAuthorsRoutes(Router $router): void
         $slug = $data['slug'] ?? Validator::slugify($data['first_name'] . ' ' . $data['last_name']);
         $db = getDb();
 
-        $stmt = $db->prepare(
-            'INSERT INTO blog_authors (site_id, first_name, last_name, email, slug, bio, avatar_url, is_active, created_at)
-             VALUES (:site_id, :first_name, :last_name, :email, :slug, :bio, :avatar_url, :is_active, NOW())'
-        );
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->bindParam(':first_name', $data['first_name'], PDO::PARAM_STR);
-        $stmt->bindParam(':last_name', $data['last_name'], PDO::PARAM_STR);
-        $stmt->bindParam(':email', $data['email'], PDO::PARAM_STR);
-        $stmt->bindParam(':slug', $slug, PDO::PARAM_STR);
-        $bio = $data['bio'] ?? null;
-        $stmt->bindParam(':bio', $bio, PDO::PARAM_STR);
-        $avatar = $data['avatar_url'] ?? null;
-        $stmt->bindParam(':avatar_url', $avatar, PDO::PARAM_STR);
-        $isActive = isset($data['is_active']) ? (int) $data['is_active'] : 1;
-        $stmt->bindParam(':is_active', $isActive, PDO::PARAM_INT);
-        $stmt->execute();
+        $row = [
+            'site_id' => $siteId,
+            'first_name' => $data['first_name'],
+            'last_name' => $data['last_name'],
+            'email' => $data['email'],
+            'slug' => $slug,
+            'bio' => isset($data['bio']) ? (string) $data['bio'] : null,
+            'is_active' => isset($data['is_active']) ? (int) $data['is_active'] : 1,
+            'created_at' => date('Y-m-d H:i:s'),
+        ];
 
-        $newId = (int) $db->lastInsertId();
+        if (blogHasColumn($db, 'blog_authors', 'avatar_url')) {
+            $row['avatar_url'] = isset($data['avatar_url']) ? (string) $data['avatar_url'] : null;
+        }
+
+        try {
+            $newId = blogInsert($db, 'blog_authors', $row);
+        } catch (\Throwable $e) {
+            Response::serverError('Failed to create author', $e->getMessage());
+            return;
+        }
+
         Audit::log((int) $admin['id'], $siteId, 'create', 'blog_author', $newId, null, $data);
-
         Response::created(['id' => $newId]);
     });
 
@@ -72,19 +77,29 @@ function registerBlogAuthorsRoutes(Router $router): void
         if (!$old) { Response::notFound('Author not found'); return; }
 
         $fields = [];
-        $bind = [];
-        foreach (['first_name', 'last_name', 'email', 'slug', 'bio', 'avatar_url', 'is_active'] as $f) {
-            if (isset($data[$f])) { $fields[] = "$f = :$f"; $bind[":$f"] = $data[$f]; }
+        foreach (['first_name', 'last_name', 'email', 'slug', 'bio', 'is_active'] as $f) {
+            if (array_key_exists($f, $data)) {
+                $fields[$f] = $f === 'is_active' ? (int) $data[$f] : $data[$f];
+            }
         }
-        if (empty($fields)) { Response::badRequest('No fields to update'); return; }
+        if (blogHasColumn($db, 'blog_authors', 'avatar_url') && array_key_exists('avatar_url', $data)) {
+            $fields['avatar_url'] = $data['avatar_url'];
+        }
 
-        $fields[] = "updated_at = NOW()";
-        $sql = 'UPDATE blog_authors SET ' . implode(', ', $fields) . ' WHERE id = :id AND site_id = :site_id';
-        $stmt = $db->prepare($sql);
-        foreach ($bind as $k => $v) $stmt->bindValue($k, $v);
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        if ($fields === []) {
+            Response::badRequest('No fields to update');
+            return;
+        }
+
+        try {
+            blogUpdate($db, 'blog_authors', $fields, 'WHERE id = :id AND site_id = :site_id', [
+                ':id' => $id,
+                ':site_id' => $siteId,
+            ]);
+        } catch (\Throwable $e) {
+            Response::serverError('Failed to update author', $e->getMessage());
+            return;
+        }
 
         Audit::log((int) $admin['id'], $siteId, 'update', 'blog_author', $id, $old, $data);
         Response::success(['id' => $id], 'Author updated');

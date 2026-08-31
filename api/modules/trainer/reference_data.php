@@ -21,15 +21,16 @@ function registerTrainerCitiesRoutes(Router $router): void
     $router->post('/api/admin/trainer/cities', function () {
         $admin = Middleware::requireRole(['superadmin', 'admin']);
         $data = Router::getJsonBody();
-        Validator::make($data)->required('name', 'Name')->required('region', 'Region')->validate();
+        Validator::make($data)->required('name', 'Name')->validate();
         $slug = $data['slug'] ?? Validator::slugify($data['name']);
         $db = getDb();
         $stmt = $db->prepare(
-            'INSERT INTO trainer_cities (slug, name, region, description, is_active) VALUES (:slug, :name, :region, :desc, :act)'
+            'INSERT INTO trainer_cities (slug, name, region) VALUES (:slug, :name, :region)'
         );
         $stmt->execute([
-            ':slug' => $slug, ':name' => $data['name'], ':region' => $data['region'],
-            ':desc' => $data['description'] ?? null, ':act' => $data['is_active'] ?? 1,
+            ':slug' => $slug,
+            ':name' => $data['name'],
+            ':region' => $data['region'] ?? null,
         ]);
         $newId = (int) $db->lastInsertId();
         Audit::log((int) $admin['id'], 5, 'create', 'trainer_city', $newId, null, $data);
@@ -43,7 +44,7 @@ function registerTrainerCitiesRoutes(Router $router): void
         $db = getDb();
         $fields = [];
         $bind = [];
-        foreach (['slug', 'name', 'region', 'description', 'is_active'] as $f) {
+        foreach (['slug', 'name', 'region'] as $f) {
             if (array_key_exists($f, $data)) { $fields[] = "$f = :$f"; $bind[":$f"] = $data[$f]; }
         }
         if (empty($fields)) { Response::badRequest('No fields'); return; }

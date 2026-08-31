@@ -181,3 +181,33 @@ function getAllSites(): array
     $stmt = $db->query('SELECT id, name, slug, domain FROM core_sites ORDER BY id');
     return $stmt->fetchAll();
 }
+
+/**
+ * Checks a column exists in the current database without requiring migrations.
+ */
+function dbTableHasColumn(PDO $db, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $table) || !preg_match('/^[A-Za-z0-9_]+$/', $column)) {
+        $cache[$key] = false;
+        return false;
+    }
+
+    try {
+        $stmt = $db->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+        );
+        $stmt->execute([':table' => $table, ':column' => $column]);
+        $cache[$key] = ((int) $stmt->fetchColumn()) > 0;
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+
+    return $cache[$key];
+}

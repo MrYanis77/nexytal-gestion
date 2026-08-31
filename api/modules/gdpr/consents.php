@@ -1,6 +1,6 @@
 <?php
 /**
- * modules/gdpr/consents.php — Liste gdpr_consents_log
+ * modules/gdpr/consents.php — Liste gdpr_consents_log (bdd.sql)
  */
 
 function registerGdprConsentsRoutes(Router $router): void
@@ -29,7 +29,7 @@ function registerGdprConsentsRoutes(Router $router): void
         $stmt = $db->prepare(
             "SELECT * FROM gdpr_consents_log 
              $whereClause 
-             ORDER BY granted_at DESC 
+             ORDER BY created_at DESC 
              LIMIT :limit OFFSET :offset"
         );
         foreach ($params as $k => $v) $stmt->bindValue($k, $v);

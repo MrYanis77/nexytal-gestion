@@ -1,6 +1,7 @@
 export * from './status';
 export * from './blog';
 export * from './formation';
+export * from './formation-career';
 export * from './recrutement';
 export * from './entreprise';
 export * from './trainer';
@@ -8,3 +9,5 @@ export * from './candidat';
 export * from './marketing';
 export * from './front-user';
 export * from './users';
+export * from './coaching';
+export * from './pricing-plans';

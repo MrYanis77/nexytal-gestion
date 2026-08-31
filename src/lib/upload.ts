@@ -12,15 +12,45 @@ export interface UploadResult {
   file_size: number;
 }
 
+/** Contexte d'upload → site_id par défaut (bdd.sql core_sites). */
+const UPLOAD_CONTEXT_SITE: Record<string, string> = {
+  formation: '1',
+  alt: '1',
+  medical: '3',
+  recrutement: '2',
+  recrut: '2',
+  carriere: '4',
+  trainers: '5',
+  trainer: '5',
+  coaching: '6',
+  coaches: '6',
+};
+
 function resolveSiteIdFromPage(): string {
   if (typeof window === 'undefined') return '';
   const path = window.location.pathname;
+  const search = new URLSearchParams(window.location.search);
+  const fromQuery = search.get('site_id') || search.get('site');
+  if (fromQuery && /^\d+$/.test(fromQuery)) return fromQuery;
+
   if (path.includes('/formation')) return '1';
   if (path.includes('/medical')) return '3';
+  if (path.includes('/recrutement-gestion') || path.includes('/validation-offres')) return fromQuery && /^\d+$/.test(fromQuery) ? fromQuery : '';
   if (path.includes('/recrutement')) return '2';
   if (path.includes('/carriere')) return '4';
   if (path.includes('/trainer')) return '5';
   if (path.includes('/coaching')) return '6';
+  return '';
+}
+
+function resolveSiteId(options: { context?: string; siteId?: string }): string {
+  if (options.siteId) return options.siteId;
+  const fromPage = resolveSiteIdFromPage();
+  if (fromPage) return fromPage;
+  if (options.context) {
+    const key = options.context.toLowerCase();
+    if (UPLOAD_CONTEXT_SITE[key]) return UPLOAD_CONTEXT_SITE[key];
+  }
   return '';
 }
 
@@ -56,10 +86,12 @@ export async function uploadMediaFile(
   if (options.context) fd.append('context', options.context);
   if (options.altText) fd.append('alt_text', options.altText);
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { 'X-Requested-With': 'XMLHttpRequest' };
   if (token) headers.Authorization = `Bearer ${token}`;
+  const csrfToken = localStorage.getItem('nexytal_csrf_token');
+  if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
 
-  const siteId = options.siteId ?? resolveSiteIdFromPage();
+  const siteId = resolveSiteId(options);
   if (siteId) headers['X-Site-Id'] = siteId;
 
   const res = await fetch(`${API_BASE}/admin/media/upload`, {

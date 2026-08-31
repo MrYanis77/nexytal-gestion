@@ -8,6 +8,36 @@
 
 class Audit
 {
+    private static function sanitizePayload(?array $data): ?array
+    {
+        if ($data === null) {
+            return null;
+        }
+
+        $sensitivePatterns = [
+            '/password/i',
+            '/token/i',
+            '/secret/i',
+            '/session/i',
+            '/authorization/i',
+        ];
+
+        foreach ($data as $key => $value) {
+            foreach ($sensitivePatterns as $pattern) {
+                if (preg_match($pattern, (string) $key)) {
+                    unset($data[$key]);
+                    continue 2;
+                }
+            }
+
+            if (is_array($value)) {
+                $data[$key] = self::sanitizePayload($value);
+            }
+        }
+
+        return $data;
+    }
+
     /**
      * Enregistre une entrée d'audit
      * 
@@ -32,7 +62,9 @@ class Audit
             $db = getDb();
             $ip = RateLimit::getClientIp();
 
+            $oldData = self::sanitizePayload($oldData);
             $oldJson = $oldData !== null ? json_encode($oldData, JSON_UNESCAPED_UNICODE) : null;
+            $newData = self::sanitizePayload($newData);
             $newJson = $newData !== null ? json_encode($newData, JSON_UNESCAPED_UNICODE) : null;
 
             $stmt = $db->prepare(

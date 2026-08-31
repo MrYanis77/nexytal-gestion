@@ -203,7 +203,39 @@ function vitePluginStorageProxy(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
+function vitePluginCopyApiToDist(): Plugin {
+  return {
+    name: "copy-api-to-dist",
+    apply: "build",
+    closeBundle() {
+      const source = path.join(PROJECT_ROOT, "api");
+      const destination = path.join(PROJECT_ROOT, "dist", "api");
+
+      if (!fs.existsSync(source)) {
+        return;
+      }
+
+      fs.rmSync(destination, { recursive: true, force: true });
+      fs.cpSync(source, destination, { recursive: true, force: true });
+
+      const envFile = path.join(destination, "config", "env");
+      const dotEnvFile = path.join(destination, "config", ".env");
+      if (!fs.existsSync(dotEnvFile) && fs.existsSync(envFile)) {
+        fs.copyFileSync(envFile, dotEnvFile);
+      }
+    },
+  };
+}
+
+const plugins = [
+  react(),
+  tailwindcss(),
+  jsxLocPlugin(),
+  vitePluginManusRuntime(),
+  vitePluginManusDebugCollector(),
+  vitePluginStorageProxy(),
+  vitePluginCopyApiToDist(),
+];
 
 export default defineConfig({
   plugins,
@@ -215,7 +247,7 @@ export default defineConfig({
   envDir: path.resolve(import.meta.dirname),
   root: path.resolve(import.meta.dirname),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: path.resolve(import.meta.dirname, "dist"),
     emptyOutDir: true,
   },
   server: {

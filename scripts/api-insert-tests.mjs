@@ -16,6 +16,7 @@ const PASSWORD = process.env.TEST_PASSWORD || 'password';
 
 const SUFFIX = Date.now().toString(36);
 const ctx = {};
+let csrfToken = null;
 const results = [];
 
 function log(icon, table, detail) {
@@ -37,6 +38,7 @@ function errMsg(data) {
 async function postJson(path, { token, siteId, body, accept200 = false } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (token && csrfToken) headers['X-CSRF-Token'] = csrfToken;
   if (siteId) headers['X-Site-Id'] = String(siteId);
 
   const res = await fetch(`${BASE}${path}`, {
@@ -95,6 +97,7 @@ async function main() {
     process.exit(1);
   }
   const token = login.data.data.token;
+  csrfToken = login.data.data.csrf_token || null;
   const siteCount = login.data.data.sites?.length ?? 0;
   log('✅', 'core_admin_users (login)', `token OK, ${siteCount} site(s) accessibles`);
   if (siteCount < 1) {

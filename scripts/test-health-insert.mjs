@@ -20,7 +20,7 @@ async function get(path) {
 async function main() {
   console.log(`\n═══ Health INSERT — ${BASE} ═══`);
 
-  await get('/api/health/insert');
+  await get(`/api/health/insert?key=${encodeURIComponent(KEY)}`);
 
   const run = await get(`/api/health/insert/run?key=${encodeURIComponent(KEY)}`);
   const summary = run.data?.data?.summary;

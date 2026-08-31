@@ -1,28 +1,77 @@
 <?php
 /**
- * modules/trainer/trainers.php — CRUD trainers (v2.1)
+ * modules/trainer/trainers.php — profils formateurs (admin + validation type coach)
  */
+
+function trainerAwaitingValidation(string $status): bool
+{
+    return in_array($status, ['pending_review', 'draft'], true);
+}
+
+function trainerFetchById(PDO $db, int $id): ?array
+{
+    $stmt = $db->prepare('SELECT * FROM trainers WHERE id = :id AND deleted_at IS NULL LIMIT 1');
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function trainerPendingWhereClause(): string
+{
+    return "t.status IN ('pending_review', 'draft') AND t.validated_at IS NULL AND t.deleted_at IS NULL";
+}
 
 function registerTrainerTrainersRoutes(Router $router): void
 {
-    $router->get('/api/admin/trainer/trainers', function () {
-        Middleware::requireRole(['superadmin', 'admin']);
+    $router->get('/api/admin/trainer/trainers/pending-count', function () {
+        Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
+        $db = getDb();
+        $siteId = Router::getQueryParam('site_id');
+        if ($siteId) {
+            $stmt = $db->prepare(
+                'SELECT COUNT(*) AS total FROM trainers t WHERE ' . trainerPendingWhereClause() . ' AND t.site_id = :site_id'
+            );
+            $stmt->execute([':site_id' => (int) $siteId]);
+        } else {
+            $stmt = $db->prepare('SELECT COUNT(*) AS total FROM trainers t WHERE ' . trainerPendingWhereClause());
+            $stmt->execute();
+        }
+        Response::success(['count' => (int) $stmt->fetch()['total']]);
+    });
+
+    $router->get('/api/admin/trainer/trainers/pending', function () {
+        Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
         $db = getDb();
         $pagination = Router::getPagination();
+        $siteId = Router::getQueryParam('site_id');
 
-        $stmt = $db->prepare('SELECT COUNT(*) as total FROM trainers WHERE deleted_at IS NULL');
+        $where = [trainerPendingWhereClause()];
+        $params = [];
+        if ($siteId) {
+            $where[] = 't.site_id = :site_id';
+            $params[':site_id'] = (int) $siteId;
+        }
+        $whereClause = 'WHERE ' . implode(' AND ', $where);
+
+        $stmt = $db->prepare("SELECT COUNT(*) AS total FROM trainers t $whereClause");
+        foreach ($params as $k => $v) {
+            $stmt->bindValue($k, $v);
+        }
         $stmt->execute();
         $total = (int) $stmt->fetch()['total'];
 
         $stmt = $db->prepare(
-            'SELECT id, slug, first_name, last_name, title, tagline, bio, avatar_url, avatar_initials,
-                    tjm_eur, experience_years, availability, legal_status, email, phone, linkedin_url,
-                    status, is_featured, qualiopi_eligible, primary_expertise_id, city_id, created_at
-             FROM trainers
-             WHERE deleted_at IS NULL
-             ORDER BY created_at DESC
-             LIMIT :limit OFFSET :offset'
+            "SELECT t.*, tc.name AS city_name, s.name AS site_name, s.slug AS site_slug
+             FROM trainers t
+             LEFT JOIN trainer_cities tc ON tc.id = t.city_id
+             INNER JOIN core_sites s ON s.id = t.site_id
+             $whereClause
+             ORDER BY t.created_at ASC
+             LIMIT :limit OFFSET :offset"
         );
+        foreach ($params as $k => $v) {
+            $stmt->bindValue($k, $v);
+        }
         $stmt->bindValue(':limit', $pagination['limit'], PDO::PARAM_INT);
         $stmt->bindValue(':offset', $pagination['offset'], PDO::PARAM_INT);
         $stmt->execute();
@@ -30,16 +79,40 @@ function registerTrainerTrainersRoutes(Router $router): void
         Response::paginated($stmt->fetchAll(), $total, $pagination['page'], $pagination['limit']);
     });
 
+    $router->get('/api/admin/trainer/trainers', function () {
+        Middleware::requireRole(['superadmin', 'admin']);
+        $siteId = Middleware::requireSiteIdFromRequest();
+        $db = getDb();
+
+        $stmt = $db->prepare(
+            'SELECT t.*, tc.name AS city_name,
+                GROUP_CONCAT(DISTINCT COALESCE(e.label, e.name) ORDER BY tel.is_primary DESC, e.label SEPARATOR \', \') AS expertise_labels,
+                CASE WHEN t.status = \'active\' AND t.validated_at IS NOT NULL THEN 1 ELSE 0 END AS on_catalog
+             FROM trainers t
+             LEFT JOIN trainer_cities tc ON tc.id = t.city_id
+             LEFT JOIN trainer_expertise_links tel ON tel.trainer_id = t.id
+             LEFT JOIN expertises e ON e.id = tel.expertise_id
+             WHERE t.site_id = :site_id AND t.deleted_at IS NULL
+             GROUP BY t.id
+             ORDER BY t.created_at DESC'
+        );
+        $stmt->execute([':site_id' => $siteId]);
+        Response::success($stmt->fetchAll());
+    });
+
     $router->get('/api/admin/trainer/trainers/{id}', function (array $params) {
         Middleware::requireRole(['superadmin', 'admin']);
+        $siteId = Middleware::requireSiteIdFromRequest();
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT * FROM trainers WHERE id = :id AND deleted_at IS NULL LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT * FROM trainers WHERE id = :id AND site_id = :site_id AND deleted_at IS NULL LIMIT 1');
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $trainer = $stmt->fetch();
-        if (!$trainer) { Response::notFound('Trainer not found'); return; }
+        if (!$trainer) {
+            Response::notFound('Trainer not found');
+            return;
+        }
 
         $stmtE = $db->prepare(
             'SELECT e.*, tel.is_primary FROM expertises e
@@ -76,8 +149,133 @@ function registerTrainerTrainersRoutes(Router $router): void
         Response::success($trainer);
     });
 
+    $router->post('/api/admin/trainer/trainers/{id}/publish', function (array $params) {
+        $admin = Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
+        $db = getDb();
+        $id = (int) $params['id'];
+
+        $old = trainerFetchById($db, $id);
+        if (!$old) {
+            Response::notFound('Trainer not found');
+            return;
+        }
+
+        $status = trim((string) ($old['status'] ?? ''));
+        if ($status === 'active' && !empty($old['validated_at'])) {
+            Response::success([
+                'id' => $id,
+                'status' => 'active',
+                'site_id' => (int) $old['site_id'],
+                'already_published' => true,
+            ], 'Profil déjà publié');
+            return;
+        }
+
+        if ($status === 'active' && empty($old['validated_at'])) {
+            $db->prepare(
+                "UPDATE trainers SET
+                    validated_at = NOW(),
+                    validated_by = :admin_id,
+                    published_at = COALESCE(published_at, NOW()),
+                    updated_at = NOW()
+                 WHERE id = :id"
+            )->execute([':id' => $id, ':admin_id' => (int) $admin['id']]);
+
+            require_once __DIR__ . '/../../core/ValidationNotify.php';
+            $fresh = trainerFetchById($db, $id) ?: $old;
+            $emailSent = validationNotifyTrainer($db, $fresh);
+
+            Audit::log((int) $admin['id'], (int) $old['site_id'], 'publish', 'trainers', $id, $old, [
+                'status' => 'active',
+                'validated_by' => (int) $admin['id'],
+                'email_sent' => $emailSent,
+                'backfill_validated_at' => true,
+            ]);
+            Response::success([
+                'id' => $id,
+                'status' => 'active',
+                'site_id' => (int) $old['site_id'],
+                'email_sent' => $emailSent,
+            ], 'Profil publié sur le catalogue');
+            return;
+        }
+
+        if (!trainerAwaitingValidation($status)) {
+            Response::badRequest('Ce profil ne peut pas être publié (statut actuel : ' . $status . ')');
+            return;
+        }
+
+        if (trim((string) ($old['first_name'] ?? '')) === '' || trim((string) ($old['last_name'] ?? '')) === '' || trim((string) ($old['title'] ?? '')) === '') {
+            Response::validationError(['first_name' => 'Identité et titre requis'], 'Complétez le profil avant publication');
+            return;
+        }
+
+        $db->beginTransaction();
+        try {
+            $db->prepare(
+                "UPDATE trainers SET
+                    status = 'active',
+                    validated_at = COALESCE(validated_at, NOW()),
+                    validated_by = COALESCE(validated_by, :admin_id),
+                    published_at = COALESCE(published_at, NOW()),
+                    updated_at = NOW()
+                 WHERE id = :id"
+            )->execute([':id' => $id, ':admin_id' => (int) $admin['id']]);
+
+            require_once __DIR__ . '/../../core/ValidationNotify.php';
+            $fresh = trainerFetchById($db, $id) ?: array_merge($old, ['status' => 'active']);
+            $emailSent = validationNotifyTrainer($db, $fresh);
+
+            $db->commit();
+
+            Audit::log((int) $admin['id'], (int) $old['site_id'], 'publish', 'trainers', $id, $old, [
+                'status' => 'active',
+                'validated_by' => (int) $admin['id'],
+                'email_sent' => $emailSent,
+            ]);
+            Response::success([
+                'id' => $id,
+                'status' => 'active',
+                'site_id' => (int) $old['site_id'],
+                'email_sent' => $emailSent,
+            ], 'Profil formateur publié');
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            Response::serverError('Échec de la publication', $e->getMessage());
+        }
+    });
+
+    $router->post('/api/admin/trainer/trainers/{id}/reject', function (array $params) {
+        $admin = Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
+        $data = Router::getJsonBody();
+        $db = getDb();
+        $id = (int) $params['id'];
+
+        $old = trainerFetchById($db, $id);
+        if (!$old) {
+            Response::notFound('Trainer not found');
+            return;
+        }
+
+        $status = trim((string) ($old['status'] ?? ''));
+        if (!trainerAwaitingValidation($status)) {
+            Response::badRequest('Ce profil ne peut pas être refusé (statut actuel : ' . $status . ')');
+            return;
+        }
+
+        $db->prepare("UPDATE trainers SET status = 'inactive', updated_at = NOW() WHERE id = :id")
+            ->execute([':id' => $id]);
+
+        require_once __DIR__ . '/../../core/ActionNotify.php';
+        $emailSent = ActionNotify::trainerStatusChanged($db, $old, 'inactive', $data['motif_refus'] ?? null);
+
+        Audit::log((int) $admin['id'], (int) $old['site_id'], 'reject', 'trainers', $id, $old, array_merge($data, ['email_sent' => $emailSent]));
+        Response::success(['id' => $id, 'status' => 'inactive', 'site_id' => (int) $old['site_id'], 'email_sent' => $emailSent], 'Profil formateur refusé');
+    });
+
     $router->post('/api/admin/trainer/trainers', function () {
         $admin = Middleware::requireRole(['superadmin', 'admin']);
+        $siteId = Middleware::requireSiteIdFromRequest();
         $data = Router::getJsonBody();
 
         Validator::make($data)
@@ -89,54 +287,70 @@ function registerTrainerTrainersRoutes(Router $router): void
             ->validate();
 
         $db = getDb();
-        $slug = $data['slug'] ?? Validator::slugify($data['first_name'] . '-' . $data['last_name']);
-
-        $stmt = $db->prepare('SELECT id FROM trainers WHERE email = :email LIMIT 1');
-        $stmt->bindParam(':email', $data['email'], PDO::PARAM_STR);
-        $stmt->execute();
-        if ($stmt->fetch()) { Response::badRequest('Email already used'); return; }
+        $slugBase = $data['slug'] ?? Validator::slugify($data['first_name'] . '-' . $data['last_name']);
+        $slug = $slugBase;
+        $suffix = 0;
+        while (true) {
+            $stmt = $db->prepare('SELECT id FROM trainers WHERE site_id = :site_id AND slug = :slug LIMIT 1');
+            $stmt->execute([':site_id' => $siteId, ':slug' => $slug]);
+            if (!$stmt->fetch()) {
+                break;
+            }
+            $suffix++;
+            $slug = $slugBase . '-' . $suffix;
+        }
 
         $db->beginTransaction();
         try {
             $status = $data['status'] ?? 'pending_review';
+            $validatedAt = null;
+            $validatedBy = null;
+            if ($status === 'active') {
+                $validatedAt = date('Y-m-d H:i:s');
+                $validatedBy = (int) $admin['id'];
+            }
             $stmt = $db->prepare(
                 'INSERT INTO trainers
-                 (slug, first_name, last_name, title, tagline, bio, avatar_initials, avatar_url, city_id,
-                  experience_years, tjm_eur, availability, legal_status, primary_expertise_id, email, phone,
-                  linkedin_url, status, is_featured, qualiopi_eligible, published_at, created_at, updated_at)
+                 (site_id, slug, first_name, last_name, title, tagline, bio, avatar_initials, avatar_url, city_id,
+                  experience_years, tjm_eur, legal_status, primary_expertise_id, email, phone,
+                  linkedin_url, status, is_featured, qualiopi_eligible, sort_order, published_at, validated_at, validated_by, created_at)
                  VALUES
-                 (:slug, :fn, :ln, :title, :tag, :bio, :ai, :av, :cid, :ey, :tjm, :avail, :ls, :peid, :email, :phone,
-                  :li, :status, :feat, :qual, :pub, NOW(), NOW())'
+                 (:site_id, :slug, :fn, :ln, :title, :tag, :bio, :ai, :av, :cid, :ey, :tjm, :ls, :peid, :email, :phone,
+                  :li, :status, :feat, :qual, :so, :pub, :vat, :vby, NOW())'
             );
-            $stmt->bindValue(':slug', $slug, PDO::PARAM_STR);
-            $stmt->bindValue(':fn', $data['first_name'], PDO::PARAM_STR);
-            $stmt->bindValue(':ln', $data['last_name'], PDO::PARAM_STR);
-            $stmt->bindValue(':title', $data['title'], PDO::PARAM_STR);
-            $stmt->bindValue(':tag', $data['tagline'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':bio', $data['bio'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':ai', $data['avatar_initials'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':av', $data['avatar_url'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':cid', $data['city_id'] ?? null, PDO::PARAM_INT);
-            $stmt->bindValue(':ey', $data['experience_years'] ?? 0, PDO::PARAM_INT);
-            $stmt->bindValue(':tjm', $data['tjm_eur'] ?? null);
-            $stmt->bindValue(':avail', $data['availability'] ?? 'available', PDO::PARAM_STR);
-            $stmt->bindValue(':ls', $data['legal_status'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':peid', $data['primary_expertise_id'] ?? null, PDO::PARAM_INT);
-            $stmt->bindValue(':email', $data['email'], PDO::PARAM_STR);
-            $stmt->bindValue(':phone', $data['phone'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':li', $data['linkedin_url'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':status', $status, PDO::PARAM_STR);
-            $stmt->bindValue(':feat', $data['is_featured'] ?? 0, PDO::PARAM_INT);
-            $stmt->bindValue(':qual', $data['qualiopi_eligible'] ?? 0, PDO::PARAM_INT);
-            $pubAt = ($status === 'active') ? date('Y-m-d H:i:s') : null;
-            $stmt->bindValue(':pub', $pubAt, PDO::PARAM_STR);
-            $stmt->execute();
+            $pubAt = ($status === 'active') ? date('Y-m-d H:i:s') : ($data['published_at'] ?? null);
+            $stmt->execute([
+                ':site_id' => $siteId,
+                ':slug' => $slug,
+                ':fn' => $data['first_name'],
+                ':ln' => $data['last_name'],
+                ':title' => $data['title'],
+                ':tag' => $data['tagline'] ?? null,
+                ':bio' => $data['bio'] ?? null,
+                ':ai' => $data['avatar_initials'] ?? null,
+                ':av' => $data['avatar_url'] ?? null,
+                ':cid' => $data['city_id'] ?? null,
+                ':ey' => (int) ($data['experience_years'] ?? 0),
+                ':tjm' => $data['tjm_eur'] ?? null,
+                ':ls' => $data['legal_status'] ?? null,
+                ':peid' => $data['primary_expertise_id'] ?? null,
+                ':email' => $data['email'],
+                ':phone' => $data['phone'] ?? null,
+                ':li' => $data['linkedin_url'] ?? null,
+                ':status' => $status,
+                ':feat' => (int) ($data['is_featured'] ?? 0),
+                ':qual' => (int) ($data['qualiopi_eligible'] ?? 0),
+                ':so' => (int) ($data['sort_order'] ?? 0),
+                ':pub' => $pubAt,
+                ':vat' => $validatedAt,
+                ':vby' => $validatedBy,
+            ]);
 
             $newId = (int) $db->lastInsertId();
             trainerSyncLinks($db, $newId, $data);
 
             $db->commit();
-            Audit::log((int) $admin['id'], 5, 'create', 'trainer', $newId, null, $data);
+            Audit::log((int) $admin['id'], $siteId, 'create', 'trainers', $newId, null, $data);
             Response::created(['id' => $newId]);
         } catch (\Exception $e) {
             $db->rollBack();
@@ -146,44 +360,57 @@ function registerTrainerTrainersRoutes(Router $router): void
 
     $router->put('/api/admin/trainer/trainers/{id}', function (array $params) {
         $admin = Middleware::requireRole(['superadmin', 'admin']);
+        $siteId = Middleware::requireSiteIdFromRequest();
         $data = Router::getJsonBody();
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT * FROM trainers WHERE id = :id AND deleted_at IS NULL LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT * FROM trainers WHERE id = :id AND site_id = :site_id AND deleted_at IS NULL LIMIT 1');
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $old = $stmt->fetch();
-        if (!$old) { Response::notFound('Trainer not found'); return; }
+        if (!$old) {
+            Response::notFound('Trainer not found');
+            return;
+        }
 
         $db->beginTransaction();
         try {
             $fields = [];
             $bind = [];
-            $updatable = [
+            foreach ([
                 'slug', 'first_name', 'last_name', 'title', 'tagline', 'bio', 'avatar_initials', 'avatar_url',
-                'city_id', 'experience_years', 'tjm_eur', 'availability', 'legal_status', 'primary_expertise_id',
-                'email', 'phone', 'linkedin_url', 'status', 'is_featured', 'qualiopi_eligible', 'published_at',
-            ];
-            foreach ($updatable as $f) {
+                'city_id', 'experience_years', 'tjm_eur', 'legal_status', 'primary_expertise_id',
+                'email', 'phone', 'linkedin_url', 'status', 'is_featured', 'qualiopi_eligible', 'sort_order', 'published_at',
+            ] as $f) {
                 if (array_key_exists($f, $data)) {
                     $fields[] = "$f = :$f";
                     $bind[":$f"] = $data[$f];
                 }
             }
+            if (array_key_exists('status', $data) && $data['status'] === 'active') {
+                $fields[] = 'validated_at = COALESCE(validated_at, NOW())';
+                $fields[] = 'validated_by = COALESCE(validated_by, :validated_by)';
+                $bind[':validated_by'] = (int) $admin['id'];
+                if (!array_key_exists('published_at', $data)) {
+                    $fields[] = 'published_at = COALESCE(published_at, NOW())';
+                }
+            }
             if (!empty($fields)) {
                 $fields[] = 'updated_at = NOW()';
-                $sql = 'UPDATE trainers SET ' . implode(', ', $fields) . ' WHERE id = :id';
+                $sql = 'UPDATE trainers SET ' . implode(', ', $fields) . ' WHERE id = :id AND site_id = :site_id';
                 $stmtU = $db->prepare($sql);
-                foreach ($bind as $k => $v) $stmtU->bindValue($k, $v);
+                foreach ($bind as $k => $v) {
+                    $stmtU->bindValue($k, $v);
+                }
                 $stmtU->bindParam(':id', $id, PDO::PARAM_INT);
+                $stmtU->bindParam(':site_id', $siteId, PDO::PARAM_INT);
                 $stmtU->execute();
             }
 
             trainerSyncLinks($db, $id, $data);
 
             $db->commit();
-            Audit::log((int) $admin['id'], 5, 'update', 'trainer', $id, $old, $data);
+            Audit::log((int) $admin['id'], $siteId, 'update', 'trainers', $id, $old, $data);
             Response::success(['id' => $id], 'Trainer updated');
         } catch (\Exception $e) {
             $db->rollBack();
@@ -193,19 +420,22 @@ function registerTrainerTrainersRoutes(Router $router): void
 
     $router->delete('/api/admin/trainer/trainers/{id}', function (array $params) {
         $admin = Middleware::requireRole(['superadmin', 'admin']);
+        $siteId = Middleware::requireSiteIdFromRequest();
         $db = getDb();
         $id = (int) $params['id'];
 
-        $stmt = $db->prepare('SELECT * FROM trainers WHERE id = :id LIMIT 1');
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = $db->prepare('SELECT * FROM trainers WHERE id = :id AND site_id = :site_id LIMIT 1');
+        $stmt->execute([':id' => $id, ':site_id' => $siteId]);
         $old = $stmt->fetch();
-        if (!$old) { Response::notFound('Trainer not found'); return; }
+        if (!$old) {
+            Response::notFound('Trainer not found');
+            return;
+        }
 
-        $stmt = $db->prepare('UPDATE trainers SET deleted_at = NOW(), status = :st WHERE id = :id');
-        $stmt->execute([':st' => 'inactive', ':id' => $id]);
+        $db->prepare("UPDATE trainers SET deleted_at = NOW(), status = 'inactive' WHERE id = :id")
+            ->execute([':id' => $id]);
 
-        Audit::log((int) $admin['id'], 5, 'delete', 'trainer', $id, $old, null);
+        Audit::log((int) $admin['id'], $siteId, 'delete', 'trainers', $id, $old, null);
         Response::noContent();
     });
 }
@@ -257,14 +487,12 @@ function trainerSyncLinks(PDO $db, int $trainerId, array $data): void
 
     if (isset($data['certification_ids']) && is_array($data['certification_ids'])) {
         $db->prepare('DELETE FROM trainer_certification_links WHERE trainer_id = :id')->execute([':id' => $trainerId]);
-        $stmtCert = $db->prepare('INSERT INTO trainer_certification_links (trainer_id, certification_id, obtained_at, expires_at) VALUES (:tid, :cid, :obt, :exp)');
+        $stmtCert = $db->prepare('INSERT INTO trainer_certification_links (trainer_id, certification_id) VALUES (:tid, :cid)');
         foreach ($data['certification_ids'] as $cert) {
-            $certId = is_array($cert) ? $cert['certification_id'] : $cert;
-            $stmtCert->execute([
-                ':tid' => $trainerId, ':cid' => (int) $certId,
-                ':obt' => is_array($cert) ? ($cert['obtained_at'] ?? null) : null,
-                ':exp' => is_array($cert) ? ($cert['expires_at'] ?? null) : null,
-            ]);
+            $certId = is_array($cert) ? ($cert['certification_id'] ?? $cert['id'] ?? null) : $cert;
+            if ($certId) {
+                $stmtCert->execute([':tid' => $trainerId, ':cid' => (int) $certId]);
+            }
         }
     }
 
@@ -272,11 +500,14 @@ function trainerSyncLinks(PDO $db, int $trainerId, array $data): void
         $db->prepare('DELETE FROM trainer_language_links WHERE trainer_id = :id')->execute([':id' => $trainerId]);
         $stmtL = $db->prepare('INSERT INTO trainer_language_links (trainer_id, language_id, level) VALUES (:tid, :lid, :lvl)');
         foreach ($data['language_ids'] as $lang) {
-            $langId = is_array($lang) ? $lang['language_id'] : $lang;
-            $stmtL->execute([
-                ':tid' => $trainerId, ':lid' => (int) $langId,
-                ':lvl' => is_array($lang) ? ($lang['level'] ?? 'native') : 'native',
-            ]);
+            $langId = is_array($lang) ? ($lang['language_id'] ?? $lang['id'] ?? null) : $lang;
+            if ($langId) {
+                $stmtL->execute([
+                    ':tid' => $trainerId,
+                    ':lid' => (int) $langId,
+                    ':lvl' => is_array($lang) ? ($lang['level'] ?? 'Courant') : 'Courant',
+                ]);
+            }
         }
     }
 

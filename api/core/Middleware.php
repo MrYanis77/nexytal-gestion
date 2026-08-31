@@ -37,6 +37,14 @@ class Middleware
             exit;
         }
 
+        if (self::requiresCsrfToken()) {
+            $csrfToken = Auth::extractCsrfToken();
+            if (!Auth::verifyCsrfToken($payload, $csrfToken)) {
+                Response::forbidden('Invalid CSRF token');
+                exit;
+            }
+        }
+
         // Vérifier que l'admin existe toujours et est actif
         $db = getDb();
         $stmt = $db->prepare(
@@ -65,6 +73,15 @@ class Middleware
 
         self::$currentAdmin = $admin;
         return $admin;
+    }
+
+    /**
+     * Les actions admin qui modifient l'etat doivent porter le jeton CSRF signe.
+     */
+    private static function requiresCsrfToken(): bool
+    {
+        $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        return in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true);
     }
 
     /**

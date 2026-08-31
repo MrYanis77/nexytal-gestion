@@ -71,8 +71,18 @@ function registerGdprDeletionRequestsRoutes(Router $router): void
             ':id' => $id,
         ]);
 
-        Audit::log((int) $admin['id'], $siteId, 'update', 'gdpr_deletion_request', $id, $old, $data);
-        Response::success(['id' => $id], 'Deletion request updated');
+        $emailSent = null;
+        if (in_array($data['status'], ['completed', 'rejected'], true) && $data['status'] !== $old['status']) {
+            require_once __DIR__ . '/../../core/ActionNotify.php';
+            $emailSent = ActionNotify::gdprRequestProcessed($db, $old, (string) $data['status']);
+        }
+        $auditData = $data;
+        if ($emailSent !== null) {
+            $auditData['email_sent'] = $emailSent;
+        }
+
+        Audit::log((int) $admin['id'], $siteId, 'update', 'gdpr_deletion_request', $id, $old, $auditData);
+        Response::success(['id' => $id, 'email_sent' => $emailSent], 'Deletion request updated');
     });
 
     $router->post('/api/public/{site_slug}/gdpr/deletion-request', function (array $params) {

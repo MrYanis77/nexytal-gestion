@@ -210,10 +210,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (response.data?.data) {
           const d = response.data.data;
           setCurrentUser(mapApiAdminToUser(d, d.sites));
+          if (d.csrf_token) {
+            localStorage.setItem('nexytal_csrf_token', d.csrf_token);
+          }
         }
       } catch {
         setCurrentUser(null);
         localStorage.removeItem('nexytal_token');
+        localStorage.removeItem('nexytal_csrf_token');
         delete api.defaults.headers.common['Authorization'];
       } finally {
         setIsLoadingAuth(false);
@@ -227,11 +231,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const response = await api.post('/admin/login', { email: username, password });
 
       if (response.data?.data?.admin) {
-        const { admin, sites, token } = response.data.data;
+        const { admin, sites, token, csrf_token } = response.data.data;
         setCurrentUser(mapApiAdminToUser(admin, sites));
         if (token) {
           localStorage.setItem('nexytal_token', token);
           api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        }
+        if (csrf_token) {
+          localStorage.setItem('nexytal_csrf_token', csrf_token);
         }
         return { ok: true };
       }
@@ -255,6 +262,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     setCurrentUser(null);
     localStorage.removeItem('nexytal_token');
+    localStorage.removeItem('nexytal_csrf_token');
     delete api.defaults.headers.common['Authorization'];
   }, []);
 

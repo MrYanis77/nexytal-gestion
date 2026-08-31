@@ -5,6 +5,7 @@ import {
   APPLICATION_STATUS_OPTIONS,
 } from './status';
 import { competencesLinkFromApi, parseCompetencesLink } from './nested-json';
+import { PHOTO_URL_HINT, PHOTO_URL_PLACEHOLDER } from '@/lib/constants';
 
 export { CONTRACT_TYPE_OPTIONS, APPLICATION_STATUS_OPTIONS };
 
@@ -22,10 +23,10 @@ const TEMPS_TRAVAIL_OPTIONS = [
 
 const OFFER_STATUS_OPTIONS = [
   { value: 'publie', label: 'Publiée' },
-  { value: 'brouillon', label: 'Brouillon' },
+  { value: 'brouillon', label: 'Brouillon / en attente' },
   { value: 'pourvue', label: 'Pourvue' },
   { value: 'expiree', label: 'Expirée' },
-  { value: 'archivee', label: 'Archivée' },
+  { value: 'archivee', label: 'Archivée / refusée' },
 ];
 
 function offerStatusToApiExtended(statut: unknown): string {
@@ -35,8 +36,11 @@ function offerStatusToApiExtended(statut: unknown): string {
     pourvue: 'pourvue',
     expiree: 'expiree',
     archivee: 'archivee',
+    en_attente: 'brouillon',
+    refusee: 'archivee',
   };
-  return typeof statut === 'string' && statut in map ? map[statut] : 'brouillon';
+  const mapped = typeof statut === 'string' && statut in map ? map[statut] : 'brouillon';
+  return mapped;
 }
 
 function offerStatusFromApiExtended(statut: unknown): string {
@@ -46,6 +50,8 @@ function offerStatusFromApiExtended(statut: unknown): string {
     pourvue: 'pourvue',
     expiree: 'expiree',
     archivee: 'archivee',
+    en_attente: 'brouillon',
+    refusee: 'archivee',
   };
   return typeof statut === 'string' && statut in map ? map[statut] : 'brouillon';
 }
@@ -71,17 +77,11 @@ export function offerToApi(raw: Record<string, unknown>) {
     salaire_afficher: raw.salaire_afficher ? 1 : 0,
     teletravail: raw.teletravail || 'non',
     temps_travail: raw.temps_travail || 'temps_plein',
-    ville: raw.lieu || raw.ville || null,
-    code_postal: raw.postal_code || raw.code_postal || null,
-    departement: raw.departement || null,
-    region: raw.region || null,
     is_urgent: raw.urgent ? 1 : 0,
     is_featured: raw.is_featured ? 1 : 0,
     statut,
     date_publication: raw.date && statut === 'publiee' ? `${raw.date} 00:00:00` : (raw.date ? `${raw.date} 00:00:00` : undefined),
     date_expiration: raw.expires_at ? `${raw.expires_at} 23:59:59` : null,
-    meta_title: raw.meta_title || null,
-    meta_description: raw.meta_description || null,
   };
   if (raw.slug) payload.slug = raw.slug;
   if ('competences_json' in raw) payload.competences = parseCompetencesLink(raw.competences_json);
@@ -131,8 +131,9 @@ export function offerDetailFromApi(row: Record<string, unknown>): Record<string,
     date: formatDate(row.date_publication ?? row.created_at),
     expires_at: row.date_expiration ? formatDate(row.date_expiration) : undefined,
     statut: offerStatusFromApiExtended(row.statut),
-    meta_title: String(row.meta_title ?? ''),
-    meta_description: String(row.meta_description ?? ''),
+    recruteur_email: String(row.recruteur_email ?? row.soumis_par_email ?? ''),
+    site_name: String(row.site_name ?? ''),
+    site_id: row.site_id != null ? String(row.site_id) : '',
     competences_json: competencesLinkFromApi(row.competences),
     competences_text: Array.isArray(row.competences)
       ? (row.competences as Array<{ label?: string }>).map(c => c.label ?? '').filter(Boolean).join('\n')
@@ -149,6 +150,7 @@ export function metierDetailFromApi(row: Record<string, unknown>): Record<string
   return {
     id: String(row.id),
     nom: String(row.libelle ?? row.nom ?? ''),
+    titre: String(row.titre ?? ''),
     slug: String(row.slug ?? ''),
     secteur: String(row.secteur_label ?? row.secteur ?? ''),
     secteur_id: row.secteur_id != null ? String(row.secteur_id) : '',
@@ -158,6 +160,16 @@ export function metierDetailFromApi(row: Record<string, unknown>): Record<string
     niveau_etudes: String(row.niveau_etudes ?? ''),
     perspectives: String(row.perspectives ?? ''),
     description: String(row.description ?? ''),
+    description_courte: String(row.description_courte ?? ''),
+    presentation: String(row.presentation ?? ''),
+    journee_type: String(row.journee_type ?? ''),
+    image_url: String(row.image_url ?? ''),
+    photo: String(row.image_url ?? ''),
+    salaire_fourchette: String(row.salaire_fourchette ?? ''),
+    salaire_debutant: String(row.salaire_debutant ?? ''),
+    salaire_confirme: String(row.salaire_confirme ?? ''),
+    salaire_liberal: String(row.salaire_liberal ?? ''),
+    salaire_details: String(row.salaire_details ?? ''),
     statut: row.actif ? 'publie' : 'brouillon',
     competences_json: competencesLinkFromApi(row.competences),
   };
@@ -166,13 +178,23 @@ export function metierDetailFromApi(row: Record<string, unknown>): Record<string
 export function metierToApi(raw: Record<string, unknown>, siteId?: number) {
   const payload: Record<string, unknown> = {
     libelle: raw.nom ?? raw.libelle,
+    titre: raw.titre || null,
+    description_courte: raw.description_courte || null,
     description: raw.description || null,
+    presentation: raw.presentation || null,
+    journee_type: raw.journee_type || null,
     secteur_id: raw.secteur_id ? Number(raw.secteur_id) : null,
     site_id: raw.site_id ? Number(raw.site_id) : siteId,
     code_rome: raw.code_rome || null,
     famille_metier: raw.famille_metier || null,
     niveau_etudes: raw.niveau_etudes || null,
     perspectives: raw.perspectives || null,
+    image_url: raw.image_url || raw.photo || null,
+    salaire_fourchette: raw.salaire_fourchette || null,
+    salaire_debutant: raw.salaire_debutant || null,
+    salaire_confirme: raw.salaire_confirme || null,
+    salaire_liberal: raw.salaire_liberal || null,
+    salaire_details: raw.salaire_details || null,
     actif: raw.statut === 'publie' ? 1 : 0,
   };
   if (raw.slug) payload.slug = raw.slug;
@@ -193,14 +215,18 @@ export function buildOfferFields(
   entrepriseOptions: { value: string; label: string }[],
   metierOptions: { value: string; label: string }[],
   recruteurOptions: { value: string; label: string }[] = [],
+  options?: { includeMetier?: boolean },
 ): import('@/components/FormModal').FieldDef[] {
+  const includeMetier = options?.includeMetier ?? metierOptions.length > 0;
   return [
     { key: 'titre', label: 'Intitulé du poste', type: 'text', required: true, span: true, section: 'Informations' },
     {
       key: 'entreprise_id', label: 'Entreprise', type: 'select', required: true, options: entrepriseOptions,
       hint: entrepriseOptions.length ? undefined : 'Créez d\'abord une entreprise (ou un établissement) dans l\'onglet Annuaire.',
     },
-    { key: 'metier_id', label: 'Métier', type: 'select', options: metierOptions },
+    ...(includeMetier && metierOptions.length
+      ? [{ key: 'metier_id', label: 'Métier', type: 'select' as const, options: metierOptions }]
+      : []),
     ...(recruteurOptions.length
       ? [{ key: 'recruteur_id', label: 'Recruteur', type: 'select' as const, options: recruteurOptions }]
       : []),
@@ -217,10 +243,6 @@ export function buildOfferFields(
     { key: 'salaire_min', label: 'Salaire min (€)', type: 'number' },
     { key: 'salaire_max', label: 'Salaire max (€)', type: 'number' },
     { key: 'salaire_afficher', label: 'Afficher le salaire', type: 'switch' },
-    { key: 'lieu', label: 'Ville', type: 'text', section: 'Localisation' },
-    { key: 'postal_code', label: 'Code postal', type: 'text' },
-    { key: 'departement', label: 'Département', type: 'text' },
-    { key: 'region', label: 'Région', type: 'text' },
     { key: 'description', label: 'Description', type: 'textarea', required: true, span: true, section: 'Contenu' },
     { key: 'profil_recherche', label: 'Profil recherché', type: 'textarea', span: true },
     { key: 'avantages', label: 'Avantages', type: 'textarea', span: true },
@@ -239,7 +261,6 @@ export function buildOfferFields(
 
 export function buildMetierFields(
   sectorOptions: { value: string; label: string }[] = [],
-  siteId?: number,
 ): import('@/components/FormModal').FieldDef[] {
   return [
     { key: 'nom', label: 'Nom du métier', type: 'text', required: true, span: true, section: 'Informations' },
@@ -253,6 +274,39 @@ export function buildMetierFields(
     { key: 'perspectives', label: 'Perspectives', type: 'textarea', span: true },
     {
       key: 'statut', label: 'Visible sur le site', type: 'select',
+      options: [{ value: 'publie', label: 'Oui' }, { value: 'brouillon', label: 'Non' }],
+    },
+  ];
+}
+
+export function buildMedicalMetierFields(
+  sectorOptions: { value: string; label: string }[] = [],
+): import('@/components/FormModal').FieldDef[] {
+  return [
+    { key: 'nom', label: 'Nom du métier', type: 'text', required: true, span: true, section: 'Identité' },
+    { key: 'titre', label: 'Titre affiché', type: 'text', span: true, hint: 'Titre public (si différent du nom)' },
+    { key: 'description_courte', label: 'Description courte', type: 'textarea', span: true, hint: 'Résumé pour les listes (max. 500 car.)' },
+    {
+      key: 'photo', label: 'Image', type: 'file', fileKind: 'image', uploadContext: 'medical',
+      span: true, placeholder: PHOTO_URL_PLACEHOLDER, hint: PHOTO_URL_HINT,
+    },
+    {
+      key: 'secteur_id', label: 'Secteur', type: 'select', section: 'Publication',
+      options: sectorOptions,
+      hint: sectorOptions.length ? undefined : 'Créez un secteur dans l\'onglet Secteurs.',
+    },
+    { key: 'presentation', label: 'Présentation', type: 'textarea', span: true, section: 'Contenu' },
+    { key: 'description', label: 'Description', type: 'textarea', span: true },
+    { key: 'journee_type', label: 'Une journée type', type: 'textarea', span: true },
+    { key: 'niveau_etudes', label: 'Niveau d\'études', type: 'text', span: true },
+    { key: 'perspectives', label: 'Perspectives / évolution', type: 'textarea', span: true },
+    { key: 'salaire_fourchette', label: 'Fourchette salariale', type: 'text', section: 'Rémunération', placeholder: 'Ex. 2 200 € – 3 500 € / mois' },
+    { key: 'salaire_debutant', label: 'Salaire débutant', type: 'text' },
+    { key: 'salaire_confirme', label: 'Salaire confirmé', type: 'text' },
+    { key: 'salaire_liberal', label: 'Salaire libéral', type: 'text' },
+    { key: 'salaire_details', label: 'Détails rémunération', type: 'textarea', span: true },
+    {
+      key: 'statut', label: 'Visible sur le site', type: 'select', section: 'Publication',
       options: [{ value: 'publie', label: 'Oui' }, { value: 'brouillon', label: 'Non' }],
     },
   ];
@@ -297,21 +351,106 @@ export function buildApplicationFields(
 export function buildExterneFields(
   offreOptions: { value: string; label: string }[] = [],
 ): import('@/components/FormModal').FieldDef[] {
+  const experienceOptions = [
+    { value: 'debutant', label: 'Débutant' },
+    { value: '1-2', label: '1-2 ans' },
+    { value: '3-5', label: '3-5 ans' },
+    { value: '5-10', label: '5-10 ans' },
+    { value: '10+', label: '10+ ans' },
+  ];
   return [
     ...(offreOptions.length
-      ? [{ key: 'offre_id', label: 'Offre', type: 'select' as const, required: true, options: offreOptions, span: true }]
-      : [{ key: 'offre_id', label: 'ID Offre', type: 'number' as const, required: true }]),
-    { key: 'prenom', label: 'Prénom', type: 'text', required: true },
+      ? [{ key: 'offre_id', label: 'Offre', type: 'select' as const, required: true, options: offreOptions, span: true, section: 'Offre visée' }]
+      : [{ key: 'offre_id', label: 'ID Offre', type: 'number' as const, required: true, section: 'Offre visée' }]),
+    { key: 'prenom', label: 'Prénom', type: 'text', required: true, section: 'Candidat' },
     { key: 'nom', label: 'Nom', type: 'text', required: true },
     { key: 'email', label: 'Email', type: 'email', required: true, span: true },
     { key: 'telephone', label: 'Téléphone', type: 'text' },
     { key: 'linkedin_url', label: 'LinkedIn', type: 'text', span: true },
+    { key: 'experience_candidat', label: 'Expérience déclarée', type: 'select', options: experienceOptions, section: 'Profil pour l\'offre' },
+    { key: 'disponibilite', label: 'Disponibilité', type: 'date' },
+    {
+      key: 'cv_filename', label: 'CV', type: 'file', fileKind: 'document', uploadContext: 'cv', span: true,
+      hint: 'PDF — chemin enregistré pour téléchargement par le recruteur',
+    },
     { key: 'lettre_motivation', label: 'Lettre de motivation', type: 'textarea', span: true },
     {
-      key: 'statut', label: 'Statut', type: 'select',
-      options: APPLICATION_STATUS_OPTIONS.filter(o => o.value !== 'retiree'),
+      key: 'competences_reponses', label: 'Réponses aux compétences de l\'offre', type: 'textarea', span: true,
+      hint: 'JSON ou une compétence par ligne (ex. Soins infirmiers : 5 ans)',
+      placeholder: '[{"competence":"Excel","niveau":"confirme"}]',
     },
+    {
+      key: 'statut', label: 'Statut pipeline', type: 'select',
+      options: APPLICATION_STATUS_OPTIONS.filter(o => o.value !== 'retiree'),
+      section: 'Pipeline',
+    },
+    { key: 'verifie_nexytal', label: 'Vérifié par Nexytal', type: 'switch', section: 'Qualification Nexytal' },
+    { key: 'score_nexytal', label: 'Score Nexytal (0-100)', type: 'number' },
+    { key: 'note_nexytal', label: 'Synthèse Nexytal', type: 'textarea', span: true },
   ];
+}
+
+export function externeToApi(raw: Record<string, unknown>) {
+  const payload: Record<string, unknown> = {
+    offre_id: Number(raw.offre_id),
+    prenom: raw.prenom,
+    nom: raw.nom,
+    email: raw.email,
+    telephone: raw.telephone || null,
+    linkedin_url: raw.linkedin_url || null,
+    lettre_motivation: raw.lettre_motivation || null,
+    experience_candidat: raw.experience_candidat || null,
+    disponibilite: raw.disponibilite || null,
+    cv_filename: raw.cv_filename || null,
+    statut: raw.statut || 'recue',
+    verifie_nexytal: raw.verifie_nexytal ? 1 : 0,
+    score_nexytal: raw.score_nexytal !== '' && raw.score_nexytal != null ? Number(raw.score_nexytal) : null,
+    note_nexytal: raw.note_nexytal || null,
+  };
+  if (raw.competences_reponses != null && raw.competences_reponses !== '') {
+    const val = raw.competences_reponses;
+    if (typeof val === 'string') {
+      try {
+        payload.competences_reponses = JSON.parse(val);
+      } catch {
+        payload.competences_reponses = val.split('\n').map(s => s.trim()).filter(Boolean);
+      }
+    } else {
+      payload.competences_reponses = val;
+    }
+  }
+  return payload;
+}
+
+export function externeDetailFromApi(row: Record<string, unknown>) {
+  let competencesDisplay = '';
+  const comp = row.competences_reponses;
+  if (comp != null && comp !== '') {
+    if (typeof comp === 'string') {
+      competencesDisplay = comp;
+    } else {
+      competencesDisplay = JSON.stringify(comp, null, 2);
+    }
+  }
+  return {
+    id: String(row.id),
+    offre_id: row.offre_id != null ? String(row.offre_id) : '',
+    offre_titre: String(row.offre_titre ?? ''),
+    prenom: String(row.prenom ?? ''),
+    nom: String(row.nom ?? ''),
+    email: String(row.email ?? ''),
+    telephone: String(row.telephone ?? ''),
+    linkedin_url: String(row.linkedin_url ?? ''),
+    lettre_motivation: String(row.lettre_motivation ?? ''),
+    cv_filename: String(row.cv_filename ?? ''),
+    experience_candidat: String(row.experience_candidat ?? ''),
+    disponibilite: String(row.disponibilite ?? '').slice(0, 10),
+    competences_reponses: competencesDisplay,
+    statut: String(row.statut ?? 'recue'),
+    verifie_nexytal: !!row.verifie_nexytal,
+    score_nexytal: row.score_nexytal != null ? Number(row.score_nexytal) : '',
+    note_nexytal: String(row.note_nexytal ?? ''),
+  };
 }
 
 export function buildAlerteFields(

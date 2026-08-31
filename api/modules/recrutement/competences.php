@@ -8,8 +8,16 @@ function registerRecrutementCompetencesRoutes(Router $router): void
     $router->get('/api/admin/recrutement/competences', function () {
         Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
         $db = getDb();
-        $stmt = $db->prepare('SELECT * FROM competences ORDER BY label ASC');
-        $stmt->execute();
+        $siteId = Router::getQueryParam('site_id');
+        
+        if ($siteId) {
+            $stmt = $db->prepare('SELECT * FROM competences WHERE site_id = :site_id OR site_id IS NULL ORDER BY label ASC');
+            $stmt->execute([':site_id' => (int) $siteId]);
+        } else {
+            $stmt = $db->prepare('SELECT * FROM competences ORDER BY label ASC');
+            $stmt->execute();
+        }
+        
         Response::success($stmt->fetchAll());
     });
 
@@ -38,10 +46,11 @@ function registerRecrutementCompetencesRoutes(Router $router): void
         $stmt->execute();
         if ($stmt->fetch()) { Response::badRequest('Competence slug already exists'); return; }
 
-        $stmt = $db->prepare('INSERT INTO competences (slug, label, categorie) VALUES (:slug, :label, :cat)');
+        $stmt = $db->prepare('INSERT INTO competences (slug, label, categorie, site_id) VALUES (:slug, :label, :cat, :site_id)');
         $stmt->bindValue(':slug', $slug, PDO::PARAM_STR);
         $stmt->bindValue(':label', $data['label'], PDO::PARAM_STR);
         $stmt->bindValue(':cat', $data['categorie'] ?? 'technique', PDO::PARAM_STR);
+        $stmt->bindValue(':site_id', isset($data['site_id']) && $data['site_id'] !== '' ? (int)$data['site_id'] : null, PDO::PARAM_INT);
         $stmt->execute();
 
         $newId = (int) $db->lastInsertId();
@@ -63,10 +72,10 @@ function registerRecrutementCompetencesRoutes(Router $router): void
 
         $fields = [];
         $bind = [];
-        foreach (['slug', 'label', 'categorie'] as $f) {
+        foreach (['slug', 'label', 'categorie', 'site_id'] as $f) {
             if (array_key_exists($f, $data)) {
                 $fields[] = "$f = :$f";
-                $bind[":$f"] = $data[$f];
+                $bind[":$f"] = $data[$f] === '' && $f === 'site_id' ? null : $data[$f];
             }
         }
         if (!empty($fields)) {

@@ -19,6 +19,7 @@ const PASSWORD = process.env.TEST_PASSWORD || 'password';
 const SUFFIX = Date.now().toString(36);
 
 let token = null;
+let csrfToken = null;
 let ctx = {};
 const lines = [];
 
@@ -31,6 +32,7 @@ function log(icon, label, detail = '') {
 async function json(method, path, { body, siteId } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (token && csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) headers['X-CSRF-Token'] = csrfToken;
   if (siteId) headers['X-Site-Id'] = String(siteId);
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -75,6 +77,7 @@ async function phaseHealth() {
     body: { email: EMAIL, password: PASSWORD },
   });
   token = login.data?.data?.token;
+  csrfToken = login.data?.data?.csrf_token || null;
   const sites = login.data?.data?.sites?.length ?? 0;
   if (login.status === 200 && token) {
     log('✅', 'Login admin', `${sites} site(s)`);

@@ -13,6 +13,7 @@ class Router
         'GET'    => [],
         'POST'   => [],
         'PUT'    => [],
+        'PATCH'  => [],
         'DELETE' => [],
     ];
 
@@ -30,6 +31,14 @@ class Router
     public function post(string $path, callable $callback): void
     {
         $this->routes['POST'][] = ['path' => $path, 'callback' => $callback];
+    }
+
+    /**
+     * Enregistre une route PATCH
+     */
+    public function patch(string $path, callable $callback): void
+    {
+        $this->routes['PATCH'][] = ['path' => $path, 'callback' => $callback];
     }
 
     /**
@@ -141,6 +150,12 @@ class Router
         if (empty($body)) {
             return [];
         }
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        if (stripos($contentType, 'application/x-www-form-urlencoded') !== false) {
+            parse_str($body, $data);
+            return is_array($data) ? $data : [];
+        }
+
         $data = json_decode($body, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             Response::badRequest('Invalid JSON body');

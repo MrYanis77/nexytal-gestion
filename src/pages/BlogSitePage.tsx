@@ -1,16 +1,16 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { BlogArticle } from '@/contexts/AppContext';
-import { useFetch } from '@/hooks/useFetch';
 import { api } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/api-errors';
 import { fetchApiDetail } from '@/lib/detail-fetch';
+import { saveBlogArticle } from '@/lib/blog-article-save';
 import {
-  blogPostFromApi,
-  blogPostToApi,
   blogPostDetailFromApi,
-  buildBlogArticleFields,
-  buildBlogCategoryFields,
+  blogCategoryToApi,
+  blogAuthorToApi,
+  blogTagToApi,
 } from '@/lib/mappers';
+import { useBlogAdmin } from '@/hooks/useBlogAdmin';
 import { SiteHeader } from '@/components/SiteHeader';
 import { DataTable, StatusBadge } from '@/components/DataTable';
 import { FormModal, ConfirmDelete } from '@/components/FormModal';
@@ -25,23 +25,26 @@ interface BlogSitePageProps {
 }
 
 export function BlogSitePage({ siteId, color, title, description, icon }: BlogSitePageProps) {
-  const SITE_QS = `?site_id=${siteId}`;
+  const {
+    SITE_QS,
+    articles,
+    blogCategoriesData,
+    authorsData,
+    tagsData,
+    articleFields,
+    blogCategoryFields,
+    authorFields,
+    tagFields,
+    refetchArticles,
+    refetchCategories,
+    refetchAuthors,
+    refetchTags,
+  } = useBlogAdmin(siteId);
+
   const [tab, setTab] = useState('articles');
   const [modal, setModal] = useState<{ type: string; item?: unknown } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; label: string } | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-
-  const { data: articlesData, refetch: refetchA } = useFetch<{ data: Record<string, unknown>[] }>(`/blog/posts${SITE_QS}`);
-  const { data: blogCategoriesData, refetch: refetchBc } = useFetch<{ data: Record<string, unknown>[] }>(`/blog/categories${SITE_QS}`);
-
-  const blogCategoryOptions = useMemo(
-    () => (blogCategoriesData?.data ?? []).map(c => ({ value: String(c.id), label: String(c.name ?? '') })),
-    [blogCategoriesData],
-  );
-
-  const articles = useMemo(() => (articlesData?.data ?? []).map(blogPostFromApi), [articlesData]);
-  const articleFields = useMemo(() => buildBlogArticleFields(blogCategoryOptions), [blogCategoryOptions]);
-  const blogCategoryFields = useMemo(() => buildBlogCategoryFields(), []);
 
   const openArticleEdit = async (item: BlogArticle) => {
     setLoadingDetail(true);
@@ -59,8 +62,10 @@ export function BlogSitePage({ siteId, color, title, description, icon }: BlogSi
     if (!deleteTarget) return;
     try {
       const map: Record<string, () => Promise<void>> = {
-        article: async () => { await api.delete(`/blog/posts/${deleteTarget.id}${SITE_QS}`); refetchA(); },
-        blog_category: async () => { await api.delete(`/blog/categories/${deleteTarget.id}${SITE_QS}`); refetchBc(); },
+        article: async () => { await api.delete(`/blog/posts/${deleteTarget.id}${SITE_QS}`); refetchArticles(); },
+        blog_category: async () => { await api.delete(`/blog/categories/${deleteTarget.id}${SITE_QS}`); refetchCategories(); },
+        blog_author: async () => { await api.delete(`/blog/authors/${deleteTarget.id}${SITE_QS}`); refetchAuthors(); },
+        blog_tag: async () => { await api.delete(`/blog/tags/${deleteTarget.id}${SITE_QS}`); refetchTags(); },
       };
       await map[deleteTarget.type]?.();
       toast.success('Élément supprimé.');
@@ -80,6 +85,8 @@ export function BlogSitePage({ siteId, color, title, description, icon }: BlogSi
         tabs={[
           { key: 'articles', label: 'Articles', count: articles.length },
           { key: 'blog_categories', label: 'Catégories', count: blogCategoriesData?.data?.length ?? 0 },
+          { key: 'blog_authors', label: 'Auteurs', count: authorsData?.data?.length ?? 0 },
+          { key: 'blog_tags', label: 'Tags', count: tagsData?.data?.length ?? 0 },
         ]}
         activeTab={tab}
         onTabChange={setTab}
@@ -121,22 +128,80 @@ export function BlogSitePage({ siteId, color, title, description, icon }: BlogSi
             ]}
           />
         )}
+
+        {tab === 'blog_authors' && (
+          <DataTable<Record<string, unknown>>
+            data={authorsData?.data ?? []}
+            accentColor={color}
+            addLabel="Nouvel auteur"
+            onAdd={() => setModal({ type: 'blog_author' })}
+            onEdit={item => setModal({ type: 'blog_author', item })}
+            onDelete={item => setDeleteTarget({
+              type: 'blog_author',
+              id: String(item.id),
+              label: `${item.first_name} ${item.last_name}`,
+            })}
+            searchKeys={['first_name', 'last_name', 'email']}
+            columns={[
+              {
+                key: 'name',
+                label: 'Auteur',
+                render: a => <span className="font-medium text-foreground">{String(a.first_name)} {String(a.last_name)}</span>,
+              },
+              { key: 'email', label: 'Email', hidden: 'sm' },
+              { key: 'is_active', label: 'Actif', render: a => a.is_active ? 'Oui' : 'Non' },
+            ]}
+          />
+        )}
+
+        {tab === 'blog_tags' && (
+          <DataTable<Record<string, unknown>>
+            data={tagsData?.data ?? []}
+            accentColor={color}
+            addLabel="Nouveau tag"
+            onAdd={() => setModal({ type: 'blog_tag' })}
+            onEdit={item => setModal({ type: 'blog_tag', item })}
+            onDelete={item => setDeleteTarget({ type: 'blog_tag', id: String(item.id), label: String(item.name) })}
+            searchKeys={['name']}
+            columns={[
+              { key: 'name', label: 'Tag', render: t => <span className="font-medium text-foreground">{String(t.name)}</span> },
+            ]}
+          />
+        )}
       </div>
 
       <FormModal open={modal?.type === 'article'} onClose={() => setModal(null)} onSave={async (raw) => {
         const item = modal?.item as BlogArticle | undefined;
-        const payload = blogPostToApi(raw);
-        if (item) await api.put(`/blog/posts/${item.id}${SITE_QS}`, payload);
-        else await api.post(`/blog/posts${SITE_QS}`, payload);
-        toast.success('Article enregistré'); refetchA(); setModal(null);
+        await saveBlogArticle(raw, SITE_QS, item?.id);
+        toast.success('Article enregistré'); refetchArticles(); setModal(null);
       }} title={modal?.item ? 'Modifier l\'article' : 'Nouvel article'} fields={articleFields}
-        initialData={modal?.item as Record<string, unknown>} accentColor={color} wide />
+        initialData={modal?.item as Record<string, unknown>} accentColor={color} wide siteId={String(siteId)} />
+
       <FormModal open={modal?.type === 'blog_category'} onClose={() => setModal(null)} onSave={async (raw) => {
         const item = modal?.item as { id: string } | undefined;
-        if (item) await api.put(`/blog/categories/${item.id}${SITE_QS}`, raw);
-        else await api.post(`/blog/categories${SITE_QS}`, raw);
-        toast.success('Catégorie enregistrée'); refetchBc(); setModal(null);
+        const payload = blogCategoryToApi(raw);
+        if (item) await api.put(`/blog/categories/${item.id}${SITE_QS}`, payload);
+        else await api.post(`/blog/categories${SITE_QS}`, payload);
+        toast.success('Catégorie enregistrée'); refetchCategories(); setModal(null);
       }} title="Catégorie d'article" fields={blogCategoryFields} initialData={modal?.item as Record<string, unknown>} accentColor={color} />
+
+      <FormModal open={modal?.type === 'blog_author'} onClose={() => setModal(null)} onSave={async (raw) => {
+        const item = modal?.item as { id: string } | undefined;
+        const payload = blogAuthorToApi(raw);
+        if (item) await api.put(`/blog/authors/${item.id}${SITE_QS}`, payload);
+        else await api.post(`/blog/authors${SITE_QS}`, payload);
+        toast.success('Auteur enregistré'); refetchAuthors(); setModal(null);
+      }} title={modal?.item ? 'Modifier l\'auteur' : 'Nouvel auteur'} fields={authorFields}
+        initialData={modal?.item as Record<string, unknown>} accentColor={color} siteId={String(siteId)} />
+
+      <FormModal open={modal?.type === 'blog_tag'} onClose={() => setModal(null)} onSave={async (raw) => {
+        const item = modal?.item as { id: string } | undefined;
+        const payload = blogTagToApi(raw);
+        if (item) await api.put(`/blog/tags/${item.id}${SITE_QS}`, payload);
+        else await api.post(`/blog/tags${SITE_QS}`, payload);
+        toast.success('Tag enregistré'); refetchTags(); setModal(null);
+      }} title={modal?.item ? 'Modifier le tag' : 'Nouveau tag'} fields={tagFields}
+        initialData={modal?.item as Record<string, unknown>} accentColor={color} />
 
       <ConfirmDelete open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} label={deleteTarget?.label} />
     </div>

@@ -46,6 +46,7 @@ import {
   HardDrive,
   ImageIcon,
   Loader2,
+  AlertTriangle,
   Search,
   Trash2,
   Upload,
@@ -183,7 +184,7 @@ export default function MediaLibraryPage() {
   const querySite = siteFilter === 'global' ? undefined : siteFilter;
   const mediaPath = `/media${buildMediaQuery({ siteId: querySite, limit: 100 })}`;
 
-  const { data, loading, refetch } = useFetch<{ data: MediaItem[] }>(mediaPath);
+  const { data, loading, error, refetch } = useFetch<{ data: MediaItem[] }>(mediaPath);
   const { data: diskData, loading: diskLoading, refetch: refetchDisk } = useFetch<{ data: DiskSpaceStats }>('/media/disk-space');
   const diskStats = diskData?.data ?? null;
 
@@ -384,6 +385,15 @@ export default function MediaLibraryPage() {
           {loading ? (
             <div className="flex justify-center py-20">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : error ? (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 py-12 px-4 text-center">
+              <AlertTriangle className="h-10 w-10 mx-auto text-destructive mb-3" />
+              <p className="text-sm font-medium text-destructive">Impossible de charger la mediatheque.</p>
+              <p className="text-xs text-muted-foreground mt-1">{error}</p>
+              <Button variant="outline" size="sm" className="mt-4 border-border" onClick={() => refetch()}>
+                Reessayer
+              </Button>
             </div>
           ) : items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-card/50 py-16 text-center">

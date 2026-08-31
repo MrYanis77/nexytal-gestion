@@ -17,6 +17,7 @@ interface FileUploadFieldProps {
   onChange: (url: string) => void;
   fileKind: UploadFileKind;
   uploadContext?: string;
+  siteId?: string;
   placeholder?: string;
   allowUrl?: boolean;
 }
@@ -26,6 +27,7 @@ export function FileUploadField({
   onChange,
   fileKind,
   uploadContext,
+  siteId,
   placeholder,
   allowUrl = true,
 }: FileUploadFieldProps) {
@@ -42,6 +44,7 @@ export function FileUploadField({
       const result = await uploadMediaFile(file, {
         type: fileKind,
         context: uploadContext,
+        siteId,
       });
       onChange(result.url);
       toast.success('Fichier uploadé');

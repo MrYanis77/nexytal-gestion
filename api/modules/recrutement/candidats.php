@@ -3,12 +3,25 @@
  * modules/recrutement/candidats.php — CRUD candidats
  */
 
+require_once __DIR__ . '/site_scope.php';
+
 function registerRecrutementCandidatsRoutes(Router $router): void
 {
     $router->get('/api/admin/recrutement/candidats', function () {
         Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
+        $siteId = recrutementRequireSiteIdFromRequest();
         $db = getDb();
-        $stmt = $db->prepare('SELECT c.*, u.email FROM candidats c LEFT JOIN users u ON c.user_id = u.id ORDER BY c.nom ASC');
+        $stmt = $db->prepare(
+            'SELECT DISTINCT c.*, u.email FROM candidats c
+             LEFT JOIN users u ON c.user_id = u.id
+             WHERE EXISTS (
+                SELECT 1 FROM candidatures ca
+                INNER JOIN offres_emploi o ON o.id = ca.offre_id
+                WHERE ca.candidat_id = c.id AND o.site_id = :site_id
+             )
+             ORDER BY c.nom ASC'
+        );
+        $stmt->bindValue(':site_id', $siteId, PDO::PARAM_INT);
         $stmt->execute();
         Response::success($stmt->fetchAll());
     });
@@ -24,17 +37,9 @@ function registerRecrutementCandidatsRoutes(Router $router): void
         $candidat = $stmt->fetch();
         if (!$candidat) { Response::notFound('Candidat not found'); return; }
 
-        $stmtC = $db->prepare('SELECT comp.*, cc.niveau, cc.annees FROM competences comp INNER JOIN candidat_competences cc ON comp.id = cc.competence_id WHERE cc.candidat_id = :id');
+        $stmtC = $db->prepare('SELECT comp.*, cc.niveau FROM competences comp INNER JOIN candidat_competences cc ON comp.id = cc.competence_id WHERE cc.candidat_id = :id');
         $stmtC->execute([':id' => $id]);
         $candidat['competences'] = $stmtC->fetchAll();
-
-        $stmtE = $db->prepare('SELECT ce.*, m.libelle as metier_libelle FROM candidat_experiences ce LEFT JOIN metiers m ON ce.metier_id = m.id WHERE ce.candidat_id = :id ORDER BY ce.date_debut DESC');
-        $stmtE->execute([':id' => $id]);
-        $candidat['experiences'] = $stmtE->fetchAll();
-
-        $stmtF = $db->prepare('SELECT * FROM candidat_formations WHERE candidat_id = :id ORDER BY annee_obtention DESC');
-        $stmtF->execute([':id' => $id]);
-        $candidat['formations'] = $stmtF->fetchAll();
 
         $stmtM = $db->prepare(
             'SELECT cms.*, m.libelle as metier_libelle FROM candidat_metiers_souhaites cms
@@ -218,53 +223,21 @@ function candidatSyncChildren(PDO $db, int $candidatId, array $data): void
 {
     if (isset($data['competences']) && is_array($data['competences'])) {
         $db->prepare('DELETE FROM candidat_competences WHERE candidat_id = :id')->execute([':id' => $candidatId]);
-        $stmtC = $db->prepare('INSERT INTO candidat_competences (candidat_id, competence_id, niveau, annees) VALUES (:cid, :coid, :niv, :ann)');
+        $stmtC = $db->prepare('INSERT INTO candidat_competences (candidat_id, competence_id, niveau) VALUES (:cid, :coid, :niv)');
         foreach ($data['competences'] as $c) {
             $stmtC->execute([
                 ':cid' => $candidatId, ':coid' => $c['competence_id'],
-                ':niv' => $c['niveau'] ?? 'intermediaire', ':ann' => $c['annees'] ?? null,
+                ':niv' => $c['niveau'] ?? 'intermediaire',
             ]);
         }
     }
 
     if (isset($data['metiers_souhaites']) && is_array($data['metiers_souhaites'])) {
         $db->prepare('DELETE FROM candidat_metiers_souhaites WHERE candidat_id = :id')->execute([':id' => $candidatId]);
-        $stmtM = $db->prepare('INSERT INTO candidat_metiers_souhaites (candidat_id, metier_id, priorite, source) VALUES (:cid, :mid, :pri, :src)');
+        $stmtM = $db->prepare('INSERT INTO candidat_metiers_souhaites (candidat_id, metier_id) VALUES (:cid, :mid)');
         foreach ($data['metiers_souhaites'] as $m) {
             $stmtM->execute([
                 ':cid' => $candidatId, ':mid' => $m['metier_id'],
-                ':pri' => $m['priorite'] ?? 1, ':src' => $m['source'] ?? 'manuel',
-            ]);
-        }
-    }
-
-    if (isset($data['experiences']) && is_array($data['experiences'])) {
-        $db->prepare('DELETE FROM candidat_experiences WHERE candidat_id = :id')->execute([':id' => $candidatId]);
-        $stmtE = $db->prepare(
-            'INSERT INTO candidat_experiences (candidat_id, metier_id, entreprise, poste, description, date_debut, date_fin, en_cours)
-             VALUES (:cid, :mid, :ent, :poste, :desc, :deb, :fin, :enc)'
-        );
-        foreach ($data['experiences'] as $e) {
-            $stmtE->execute([
-                ':cid' => $candidatId, ':mid' => $e['metier_id'] ?? null,
-                ':ent' => $e['entreprise'], ':poste' => $e['poste'],
-                ':desc' => $e['description'] ?? null, ':deb' => $e['date_debut'],
-                ':fin' => $e['date_fin'] ?? null, ':enc' => $e['en_cours'] ?? 0,
-            ]);
-        }
-    }
-
-    if (isset($data['formations']) && is_array($data['formations'])) {
-        $db->prepare('DELETE FROM candidat_formations WHERE candidat_id = :id')->execute([':id' => $candidatId]);
-        $stmtF = $db->prepare(
-            'INSERT INTO candidat_formations (candidat_id, diplome, etablissement, annee_obtention, niveau)
-             VALUES (:cid, :dip, :etab, :annee, :niv)'
-        );
-        foreach ($data['formations'] as $f) {
-            $stmtF->execute([
-                ':cid' => $candidatId, ':dip' => $f['diplome'],
-                ':etab' => $f['etablissement'] ?? null, ':annee' => $f['annee_obtention'] ?? null,
-                ':niv' => $f['niveau'] ?? null,
             ]);
         }
     }

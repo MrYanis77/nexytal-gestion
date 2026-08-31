@@ -10,6 +10,8 @@ export function entrepriseFromApi(row: Record<string, unknown>): Entreprise {
     site_web: String(row.site_web ?? ''),
     ville: String(row.ville ?? ''),
     code_postal: String(row.code_postal ?? ''),
+    departement: String(row.departement ?? ''),
+    region: String(row.region ?? ''),
     secteur_id: row.secteur_id != null ? String(row.secteur_id) : undefined,
     validee: !!row.validee,
   };
@@ -34,6 +36,8 @@ export function entrepriseToApi(raw: Record<string, unknown>, siteId?: number) {
     adresse: raw.adresse || null,
     code_postal: raw.code_postal || null,
     ville: raw.ville || null,
+    departement: raw.departement || null,
+    region: raw.region || null,
     validee: raw.validee ? 1 : 0,
   };
   if (siteId != null) payload.site_id = siteId;
@@ -42,12 +46,14 @@ export function entrepriseToApi(raw: Record<string, unknown>, siteId?: number) {
 
 export function recruteurToApi(raw: Record<string, unknown>) {
   return {
+    email: raw.email,
+    nom_entreprise: raw.nom_entreprise,
     prenom: raw.prenom,
     nom: raw.nom,
-    entreprise_id: Number(raw.entreprise_id),
+    entreprise_id: raw.entreprise_id ? Number(raw.entreprise_id) : null,
     fonction: raw.fonction || null,
     telephone: raw.telephone || null,
-    principal: raw.principal ? 1 : 0,
+    status: raw.status || undefined,
   };
 }
 
@@ -71,6 +77,8 @@ export function buildEntrepriseFields(
     { key: 'adresse', label: 'Adresse', type: 'text', span: true, section: 'Adresse' },
     { key: 'ville', label: 'Ville', type: 'text' },
     { key: 'code_postal', label: 'Code postal', type: 'text' },
+    { key: 'departement', label: 'Département', type: 'text', placeholder: 'Ex. 77' },
+    { key: 'region', label: 'Région', type: 'text', placeholder: 'Ex. Île-de-France' },
     ...(sectorOptions.length
       ? [{ key: 'secteur_id', label: 'Secteur', type: 'select' as const, options: sectorOptions }]
       : []),
@@ -80,22 +88,25 @@ export function buildEntrepriseFields(
 }
 
 export function buildRecruteurFields(
-  entrepriseOptions: { value: string; label: string }[],
+  entrepriseOptions: { value: string; label: string }[] = [],
 ): import('@/components/FormModal').FieldDef[] {
   return [
-    { key: 'prenom', label: 'Prénom', type: 'text', required: true, section: 'Identité' },
+    { key: 'email', label: 'Email', type: 'email', required: true, span: true, section: 'Identité' },
+    { key: 'prenom', label: 'Prénom', type: 'text', required: true },
     { key: 'nom', label: 'Nom', type: 'text', required: true },
+    { key: 'nom_entreprise', label: 'Nom de l\'entreprise', type: 'text', required: true, span: true, section: 'Entreprise' },
+    ...(entrepriseOptions.length
+      ? [{ key: 'entreprise_id', label: 'Entreprise (annuaire)', type: 'select' as const, options: entrepriseOptions, hint: 'Lier à une entreprise existante dans l\'annuaire (optionnel)' }]
+      : []),
+    { key: 'fonction', label: 'Fonction', type: 'text', section: 'Contact' },
+    { key: 'telephone', label: 'Téléphone', type: 'text' },
     {
-      key: 'entreprise_id',
-      label: 'Entreprise',
-      type: 'select',
-      required: true,
-      options: entrepriseOptions,
-      span: true,
-      hint: entrepriseOptions.length ? undefined : 'Créez d\'abord une entreprise dans l\'onglet Annuaire.',
+      key: 'status', label: 'Statut', type: 'select', section: 'Statut',
+      options: [
+        { value: 'pending', label: 'En attente' },
+        { value: 'actif', label: 'Actif' },
+        { value: 'suspendu', label: 'Suspendu' },
+      ],
     },
-    { key: 'fonction', label: 'Fonction (optionnel)', type: 'text', section: 'Contact' },
-    { key: 'telephone', label: 'Téléphone (optionnel)', type: 'text' },
-    { key: 'principal', label: 'Contact principal', type: 'switch', section: 'Options' },
   ];
 }

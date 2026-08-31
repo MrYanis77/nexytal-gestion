@@ -27,6 +27,10 @@ function registerAuthMeRoutes(Router $router): void
             $sites = $stmt->fetchAll();
         }
 
+        $token = Auth::extractToken();
+        $payload = is_string($token) ? Auth::verifyToken($token) : false;
+        $csrfToken = is_array($payload) ? Auth::generateCsrfToken($payload) : '';
+
         Response::success([
             'id'         => (int) $admin['id'],
             'email'      => $admin['email'],
@@ -34,6 +38,7 @@ function registerAuthMeRoutes(Router $router): void
             'last_name'  => $admin['last_name'],
             'role'       => $admin['role'],
             'avatar_url' => $admin['avatar_url'],
+            'csrf_token' => $csrfToken,
             'sites'      => $sites,
         ]);
     });

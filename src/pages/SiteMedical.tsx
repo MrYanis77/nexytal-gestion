@@ -1,19 +1,20 @@
 import { Stethoscope } from 'lucide-react';
-import { RecrutementAdminPage } from './RecrutementAdminPage';
+import { SiteRecruitmentBoard } from './SiteRecruitmentBoard';
 
 const COLOR = '#059669';
 
 export default function SiteMedical() {
   return (
-    <RecrutementAdminPage
+    <SiteRecruitmentBoard
       siteId={3}
       color={COLOR}
-      title="Nexytal MÃ©dical"
-      description="GÃ©rez les offres mÃ©dicales, les candidatures et le contenu du site"
+      title="Nexytal Médical"
+      description="Offres, candidatures, établissements et actualités du site médical"
       icon={<Stethoscope className="w-5 h-5" />}
-      entrepriseTabLabel="Ã‰tablissements"
-      addEntrepriseLabel="Nouvel Ã©tablissement"
-      showRecruteurs={false}
+      medicalMetiers
+      entrepriseTabLabel="Établissements"
+      addEntrepriseLabel="Nouvel établissement"
+      mainRoleLabel="Recruteur"
     />
   );
 }

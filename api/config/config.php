@@ -46,9 +46,18 @@ if (!defined('DB_CHARSET')) {
     define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
 }
 
+// ===== ENVIRONNEMENT =====
+if (!defined('APP_ENV')) {
+    define('APP_ENV', env('APP_ENV', 'production'));
+}
+
 // ===== JWT =====
 if (!defined('JWT_SECRET')) {
-    define('JWT_SECRET', env('JWT_SECRET', 'NxYt4L_S3cr3t_K3y_2024_Ch4ng3_Th1s_T0_A_64_Ch4r_R4nd0m_Str1ng_Pl34s3!!'));
+    $jwtSecret = env('JWT_SECRET', '');
+    if ($jwtSecret === '' && APP_ENV !== 'production') {
+        $jwtSecret = hash('sha256', __DIR__ . '|' . php_uname('n') . '|nexytal-dev-jwt');
+    }
+    define('JWT_SECRET', $jwtSecret);
 }
 if (!defined('JWT_EXPIRY')) {
     define('JWT_EXPIRY', (int) env('JWT_EXPIRY', '86400'));
@@ -104,11 +113,6 @@ if (!defined('ALLOWED_ORIGINS')) {
     ]);
 }
 
-// ===== ENVIRONNEMENT =====
-if (!defined('APP_ENV')) {
-    define('APP_ENV', env('APP_ENV', 'production'));
-}
-
 // ===== TESTS INSERT (/api/health/insert) =====
 if (!defined('INSERT_TEST_KEY')) {
     define('INSERT_TEST_KEY', env('INSERT_TEST_KEY', 'nexytal-insert-test'));
@@ -122,10 +126,32 @@ if (!defined('RATE_LIMIT_WINDOW_MINUTES')) {
     define('RATE_LIMIT_WINDOW_MINUTES', (int) env('RATE_LIMIT_WINDOW_MINUTES', '15'));
 }
 
+// ===== SYSTEM LOGS =====
+if (!defined('SYSTEM_LOG_PATHS')) {
+    define('SYSTEM_LOG_PATHS', env('SYSTEM_LOG_PATHS', ''));
+}
+if (!defined('SYSTEM_LOG_TAIL_BYTES')) {
+    define('SYSTEM_LOG_TAIL_BYTES', (int) env('SYSTEM_LOG_TAIL_BYTES', (string) (1024 * 1024)));
+}
+
 // ===== PAGINATION =====
 if (!defined('DEFAULT_PAGE_SIZE')) {
     define('DEFAULT_PAGE_SIZE', (int) env('DEFAULT_PAGE_SIZE', '20'));
 }
 if (!defined('MAX_PAGE_SIZE')) {
-    define('MAX_PAGE_SIZE', (int) env('MAX_PAGE_SIZE', '100'));
+    define('MAX_PAGE_SIZE', (int) env('MAX_PAGE_SIZE', '500'));
+}
+
+// ===== EMAIL (SMTP Ionos) =====
+if (!defined('MAIL_FROM')) {
+    define('MAIL_FROM', env('MAIL_FROM', env('SMTP_USER', 'contact@nexytal.com')));
+}
+if (!defined('MAIL_FROM_NAME')) {
+    define('MAIL_FROM_NAME', env('MAIL_FROM_NAME', 'Nexytal'));
+}
+if (!defined('MAIL_TO')) {
+    define('MAIL_TO', env('MAIL_TO', 'contact@nexytal.com'));
+}
+if (!defined('ADMIN_NOTIFICATION_EMAIL')) {
+    define('ADMIN_NOTIFICATION_EMAIL', env('ADMIN_NOTIFICATION_EMAIL', env('MAIL_TO', 'contact@nexytal.com')));
 }

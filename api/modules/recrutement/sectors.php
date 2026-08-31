@@ -3,23 +3,20 @@
  * modules/recrutement/sectors.php — CRUD secteurs_activite
  */
 
+require_once __DIR__ . '/site_scope.php';
+
 function registerRecrutementSectorsRoutes(Router $router): void
 {
     $router->get('/api/admin/recrutement/sectors', function () {
         Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
+        $siteId = recrutementRequireSiteIdFromRequest();
         $db = getDb();
-        $siteId = Router::getQueryParam('site_id');
-        $sql = 'SELECT * FROM secteurs_activite';
-        $params = [];
-        if ($siteId !== null && $siteId !== '') {
-            $sql .= ' WHERE site_id = :site_id';
-            $params[':site_id'] = (int) $siteId;
-        }
-        $sql .= ' ORDER BY label ASC';
+        $sql = 'SELECT sa.*,
+            (SELECT COUNT(*) FROM metiers m WHERE m.secteur_id = sa.id AND m.site_id = :site_id) AS metiers_count
+        FROM secteurs_activite sa
+        ORDER BY sa.label ASC';
         $stmt = $db->prepare($sql);
-        foreach ($params as $k => $v) {
-            $stmt->bindValue($k, $v, PDO::PARAM_INT);
-        }
+        $stmt->bindValue(':site_id', $siteId, PDO::PARAM_INT);
         $stmt->execute();
         Response::success($stmt->fetchAll());
     });
@@ -27,6 +24,9 @@ function registerRecrutementSectorsRoutes(Router $router): void
     $router->post('/api/admin/recrutement/sectors', function () {
         $admin = Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
         $data = Router::getJsonBody();
+        if (!isset($data['label']) && isset($data['name'])) {
+            $data['label'] = $data['name'];
+        }
         
         Validator::make($data)->required('label', 'Label')->validate();
         $slug = $data['slug'] ?? Validator::slugify($data['label']);
@@ -37,15 +37,14 @@ function registerRecrutementSectorsRoutes(Router $router): void
         $stmt->execute();
         if ($stmt->fetch()) { Response::badRequest('Sector slug already exists'); return; }
 
-        $siteId = isset($data['site_id']) ? (int) $data['site_id'] : (int) ($_SERVER['HTTP_X_SITE_ID'] ?? 0);
-        $stmt = $db->prepare('INSERT INTO secteurs_activite (site_id, label, slug) VALUES (:site_id, :label, :slug)');
-        $stmt->bindValue(':site_id', $siteId > 0 ? $siteId : null, PDO::PARAM_INT);
+        $siteId = recrutementResolveSiteIdFromBody($data, $admin);
+        $stmt = $db->prepare('INSERT INTO secteurs_activite (slug, label) VALUES (:slug, :label)');
         $stmt->bindParam(':label', $data['label'], PDO::PARAM_STR);
         $stmt->bindParam(':slug', $slug, PDO::PARAM_STR);
         $stmt->execute();
         
         $newId = (int) $db->lastInsertId();
-        Audit::log((int) $admin['id'], 1, 'create', 'secteur_activite', $newId, null, $data);
+        Audit::log((int) $admin['id'], $siteId, 'create', 'secteur_activite', $newId, null, $data);
         Response::created(['id' => $newId]);
     });
 
@@ -73,7 +72,7 @@ function registerRecrutementSectorsRoutes(Router $router): void
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
         
-        Audit::log((int) $admin['id'], 1, 'update', 'secteur_activite', $id, $old, $data);
+        Audit::log((int) $admin['id'], null, 'update', 'secteur_activite', $id, $old, $data);
         Response::success(['id' => $id], 'Sector updated');
     });
 
@@ -92,7 +91,7 @@ function registerRecrutementSectorsRoutes(Router $router): void
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
         
-        Audit::log((int) $admin['id'], 1, 'delete', 'secteur_activite', $id, $old, null);
+        Audit::log((int) $admin['id'], null, 'delete', 'secteur_activite', $id, $old, null);
         Response::noContent();
     });
 }

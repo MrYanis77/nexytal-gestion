@@ -3,18 +3,19 @@
  * modules/blog/categories.php — CRUD blog_categories (admin, filtré par site_id)
  */
 
+require_once __DIR__ . '/blog_helpers.php';
+
 function registerBlogCategoriesRoutes(Router $router): void
 {
-    // ===== LISTE =====
     $router->get('/api/admin/blog/categories', function () {
         $siteId = Middleware::requireSiteIdFromRequest();
         $db = getDb();
+        $cols = blogCategoriesSelectSql($db);
 
         $stmt = $db->prepare(
-            'SELECT id, site_id, name, slug, description, color, is_active, sort_order, created_at 
-             FROM blog_categories 
-             WHERE site_id = :site_id 
-             ORDER BY sort_order ASC, name ASC'
+            "SELECT {$cols} FROM blog_categories
+             WHERE site_id = :site_id
+             ORDER BY sort_order ASC, name ASC"
         );
         $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
         $stmt->execute();
@@ -22,7 +23,6 @@ function registerBlogCategoriesRoutes(Router $router): void
         Response::success($stmt->fetchAll());
     });
 
-    // ===== CRÉER =====
     $router->post('/api/admin/blog/categories', function () {
         $siteId = Middleware::requireSiteIdFromRequest();
         $admin = Middleware::requireRole(['superadmin', 'admin', 'editor']);
@@ -34,9 +34,12 @@ function registerBlogCategoriesRoutes(Router $router): void
             ->validate();
 
         $slug = $data['slug'] ?? Validator::slugify($data['name']);
+        if ($slug === '') {
+            Response::badRequest('Slug invalide — renseignez un nom de catégorie valide');
+            return;
+        }
         $db = getDb();
 
-        // Vérifier unicité slug par site
         $stmt = $db->prepare('SELECT id FROM blog_categories WHERE site_id = :site_id AND slug = :slug LIMIT 1');
         $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
         $stmt->bindParam(':slug', $slug, PDO::PARAM_STR);
@@ -46,31 +49,31 @@ function registerBlogCategoriesRoutes(Router $router): void
             return;
         }
 
-        $stmt = $db->prepare(
-            'INSERT INTO blog_categories (site_id, name, slug, description, color, is_active, sort_order, created_at) 
-             VALUES (:site_id, :name, :slug, :description, :color, :is_active, :sort_order, NOW())'
-        );
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->bindParam(':name', $data['name'], PDO::PARAM_STR);
-        $stmt->bindParam(':slug', $slug, PDO::PARAM_STR);
-        $desc = $data['description'] ?? null;
-        $stmt->bindParam(':description', $desc, PDO::PARAM_STR);
-        $color = $data['color'] ?? null;
-        $stmt->bindParam(':color', $color, PDO::PARAM_STR);
-        $isActive = isset($data['is_active']) ? (int) $data['is_active'] : 1;
-        $stmt->bindParam(':is_active', $isActive, PDO::PARAM_INT);
-        $sortOrder = (int) ($data['sort_order'] ?? 0);
-        $stmt->bindParam(':sort_order', $sortOrder, PDO::PARAM_INT);
-        $stmt->execute();
+        $row = [
+            'site_id' => $siteId,
+            'name' => $data['name'],
+            'slug' => $slug,
+            'description' => $data['description'] ?? null,
+            'is_active' => isset($data['is_active']) ? (int) $data['is_active'] : 1,
+            'sort_order' => (int) ($data['sort_order'] ?? 0),
+            'created_at' => date('Y-m-d H:i:s'),
+        ];
 
-        $newId = (int) $db->lastInsertId();
+        if (blogHasColumn($db, 'blog_categories', 'color')) {
+            $row['color'] = $data['color'] ?? null;
+        }
+
+        try {
+            $newId = blogInsert($db, 'blog_categories', $row);
+        } catch (\Throwable $e) {
+            Response::serverError('Failed to create category', $e->getMessage());
+            return;
+        }
 
         Audit::log((int) $admin['id'], $siteId, 'create', 'blog_category', $newId, null, $data);
-
         Response::created(['id' => $newId]);
     });
 
-    // ===== MODIFIER =====
     $router->put('/api/admin/blog/categories/{id}', function (array $params) {
         $siteId = Middleware::requireSiteIdFromRequest();
         $admin = Middleware::requireRole(['superadmin', 'admin', 'editor']);
@@ -90,33 +93,34 @@ function registerBlogCategoriesRoutes(Router $router): void
         }
 
         $fields = [];
-        $bind = [];
-        foreach (['name', 'slug', 'description', 'color', 'is_active', 'sort_order'] as $f) {
-            if (isset($data[$f])) {
-                $fields[] = "$f = :$f";
-                $bind[":$f"] = $data[$f];
+        foreach (['name', 'slug', 'description', 'is_active', 'sort_order'] as $f) {
+            if (array_key_exists($f, $data)) {
+                $fields[$f] = in_array($f, ['is_active', 'sort_order'], true) ? (int) $data[$f] : $data[$f];
             }
         }
+        if (blogHasColumn($db, 'blog_categories', 'color') && array_key_exists('color', $data)) {
+            $fields['color'] = $data['color'];
+        }
 
-        if (empty($fields)) {
+        if ($fields === []) {
             Response::badRequest('No fields to update');
             return;
         }
 
-        $fields[] = "updated_at = NOW()";
-        $sql = 'UPDATE blog_categories SET ' . implode(', ', $fields) . ' WHERE id = :id AND site_id = :site_id';
-        $stmt = $db->prepare($sql);
-        foreach ($bind as $k => $v) $stmt->bindValue($k, $v);
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->bindParam(':site_id', $siteId, PDO::PARAM_INT);
-        $stmt->execute();
+        try {
+            blogUpdate($db, 'blog_categories', $fields, 'WHERE id = :id AND site_id = :site_id', [
+                ':id' => $id,
+                ':site_id' => $siteId,
+            ]);
+        } catch (\Throwable $e) {
+            Response::serverError('Failed to update category', $e->getMessage());
+            return;
+        }
 
         Audit::log((int) $admin['id'], $siteId, 'update', 'blog_category', $id, $old, $data);
-
         Response::success(['id' => $id], 'Category updated');
     });
 
-    // ===== SUPPRIMER =====
     $router->delete('/api/admin/blog/categories/{id}', function (array $params) {
         $siteId = Middleware::requireSiteIdFromRequest();
         $admin = Middleware::requireRole(['superadmin', 'admin']);
@@ -140,7 +144,6 @@ function registerBlogCategoriesRoutes(Router $router): void
         $stmt->execute();
 
         Audit::log((int) $admin['id'], $siteId, 'delete', 'blog_category', $id, $old, null);
-
         Response::noContent();
     });
 }

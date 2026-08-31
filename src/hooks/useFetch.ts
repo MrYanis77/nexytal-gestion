@@ -9,12 +9,17 @@ interface UseFetchResult<T> {
   refetch: () => Promise<void>;
 }
 
-export function useFetch<T>(url: string, options?: AxiosRequestConfig): UseFetchResult<T> {
+export function useFetch<T>(url: string | null | undefined, options?: AxiosRequestConfig): UseFetchResult<T> {
   const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(!!url);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
+    if (!url) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

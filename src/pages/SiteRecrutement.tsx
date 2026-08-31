@@ -1,16 +1,17 @@
 import { Briefcase } from 'lucide-react';
-import { RecrutementAdminPage } from './RecrutementAdminPage';
+import { SiteRecruitmentBoard } from './SiteRecruitmentBoard';
 
 const COLOR = '#2563EB';
 
 export default function SiteRecrutement() {
   return (
-    <RecrutementAdminPage
+    <SiteRecruitmentBoard
       siteId={2}
       color={COLOR}
       title="Nexytal Recrutement"
-      description="GÃ©rez les offres d'emploi, les candidatures et le contenu du site"
+      description="Offres, candidatures, entreprises et actualités du site recrutement IT"
       icon={<Briefcase className="w-5 h-5" />}
+      mainRoleLabel="Recruteur"
     />
   );
 }

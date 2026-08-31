@@ -1,14 +1,17 @@
-import { Briefcase } from 'lucide-react';
-import { BlogSitePage } from './BlogSitePage';
+import { TrendingUp } from 'lucide-react';
+import { SiteRecruitmentBoard } from './SiteRecruitmentBoard';
+
+const COLOR = '#D97706';
 
 export default function SiteCarriere() {
   return (
-    <BlogSitePage
+    <SiteRecruitmentBoard
       siteId={4}
-      color="#10B981"
+      color={COLOR}
       title="Nexytal Carrière"
-      description="Articles et actualités pour le site carrière"
-      icon={<Briefcase className="w-5 h-5" />}
+      description="Offres, candidatures, entreprises et actualités du site carrière"
+      icon={<TrendingUp className="w-5 h-5" />}
+      showSitePricing
     />
   );
 }

@@ -12,6 +12,14 @@ export interface Column<T> {
   hidden?: 'sm' | 'md' | 'lg';
 }
 
+interface SelectFilterConfig<T> {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  filterKey: keyof T;
+  allLabel?: string;
+}
+
 interface DataTableProps<T extends { id: string }> {
   data: T[];
   columns: Column<T>[];
@@ -20,6 +28,7 @@ interface DataTableProps<T extends { id: string }> {
   onDelete?: (item: T) => void;
   onView?: (item: T) => void;
   searchKeys?: (keyof T)[];
+  selectFilter?: SelectFilterConfig<T>;
   addLabel?: string;
   emptyMessage?: string;
   accentColor?: string;
@@ -34,6 +43,7 @@ export function DataTable<T extends { id: string }>({
   onDelete,
   onView,
   searchKeys = [],
+  selectFilter,
   addLabel = 'Ajouter',
   emptyMessage = 'Aucun élément trouvé.',
   accentColor = '#2563EB',
@@ -43,6 +53,10 @@ export function DataTable<T extends { id: string }>({
   const [page, setPage] = useState(1);
 
   const filtered = data.filter(item => {
+    if (selectFilter?.value) {
+      const fieldVal = item[selectFilter.filterKey];
+      if (String(fieldVal ?? '') !== selectFilter.value) return false;
+    }
     if (!search) return true;
     return searchKeys.some(key => {
       const val = item[key];
@@ -72,6 +86,19 @@ export function DataTable<T extends { id: string }>({
             className="pl-9 h-9 bg-secondary border-border text-sm"
           />
         </div>
+        {selectFilter && (
+          <select
+            value={selectFilter.value}
+            onChange={e => { selectFilter.onChange(e.target.value); setPage(1); }}
+            className="h-9 min-w-[180px] rounded-md border border-border bg-secondary px-3 text-sm text-foreground"
+            aria-label={selectFilter.allLabel ?? 'Filtrer par catégorie'}
+          >
+            <option value="">{selectFilter.allLabel ?? 'Toutes les catégories'}</option>
+            {selectFilter.options.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        )}
         {onAdd && (
           <Button size="sm" onClick={onAdd} className="h-9 gap-2 text-sm font-medium"
             style={{ background: accentColor, boxShadow: `0 2px 12px ${accentColor}40` }}>
@@ -177,6 +204,7 @@ export function StatusBadge({ statut }: { statut: string }) {
     publie: { label: 'Publié', class: 'bg-green-500/15 text-green-400' },
     published: { label: 'Publié', class: 'bg-green-500/15 text-green-400' },
     brouillon: { label: 'Brouillon', class: 'bg-yellow-500/15 text-yellow-400' },
+    archivee: { label: 'Archivée', class: 'bg-red-500/15 text-red-400' },
     draft: { label: 'Brouillon', class: 'bg-yellow-500/15 text-yellow-400' },
     actif: { label: 'Actif', class: 'bg-green-500/15 text-green-400' },
     active: { label: 'Actif', class: 'bg-green-500/15 text-green-400' },
@@ -196,6 +224,7 @@ export function StatusBadge({ statut }: { statut: string }) {
     interview: { label: 'Entretien', class: 'bg-blue-500/15 text-blue-400' },
     approved: { label: 'Approuvée', class: 'bg-green-500/15 text-green-400' },
     rejected: { label: 'Refusée', class: 'bg-red-500/15 text-red-400' },
+    refusee: { label: 'Refusée', class: 'bg-red-500/15 text-red-400' },
   };
   const s = map[statut] ?? { label: statut, class: 'bg-secondary text-muted-foreground' };
   return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${s.class}`}>{s.label}</span>;

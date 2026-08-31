@@ -7,6 +7,7 @@ const PASSWORD = process.env.TEST_PASSWORD || 'password';
 const suffix = Date.now().toString(36);
 
 const created = {};
+let csrfToken = null;
 const results = [];
 
 function ok(name, cond, detail) {
@@ -18,6 +19,7 @@ function ok(name, cond, detail) {
 async function req(method, path, { token, siteId, body } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (token && csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) headers['X-CSRF-Token'] = csrfToken;
   if (siteId) headers['X-Site-Id'] = String(siteId);
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -32,6 +34,7 @@ async function req(method, path, { token, siteId, body } = {}) {
 async function main() {
   const login = await req('POST', '/api/admin/login', { body: { email: EMAIL, password: PASSWORD } });
   const token = login.data?.data?.token;
+  csrfToken = login.data?.data?.csrf_token || null;
   if (!token) throw new Error('Login failed');
 
   console.log('\n=== Phase 1 : Bootstrap références ===\n');

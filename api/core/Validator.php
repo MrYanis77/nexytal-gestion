@@ -265,10 +265,197 @@ class Validator
     }
 
     /**
-     * Nettoie un contenu HTML (autorise certaines balises)
+     * Nettoie un contenu HTML (autorise certaines balises).
+     * Les attributs sont reconstruits explicitement pour eviter XSS stocke.
      */
     public static function sanitizeHtml(string $value): string
     {
-        return trim(strip_tags($value, '<p><br><strong><em><ul><ol><li><h2><h3><h4><a><img><blockquote><code><pre>'));
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+
+        if (!class_exists('DOMDocument')) {
+            return self::sanitizeHtmlFallback($value);
+        }
+
+        $allowedTags = [
+            'p', 'br', 'strong', 'em', 'ul', 'ol', 'li', 'h2', 'h3', 'h4',
+            'a', 'img', 'blockquote', 'code', 'pre',
+        ];
+        $allowedAttrs = [
+            'a' => ['href', 'title', 'target', 'rel'],
+            'img' => ['src', 'alt', 'title', 'width', 'height', 'loading'],
+        ];
+
+        $doc = new DOMDocument('1.0', 'UTF-8');
+        $previous = libxml_use_internal_errors(true);
+        $html = '<!DOCTYPE html><html><body><div id="__nexytal_root">' . $value . '</div></body></html>';
+        $loaded = $doc->loadHTML($html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        if (!$loaded) {
+            return self::sanitizeHtmlFallback($value);
+        }
+
+        $root = null;
+        foreach ($doc->getElementsByTagName('div') as $div) {
+            if ($div->getAttribute('id') === '__nexytal_root') {
+                $root = $div;
+                break;
+            }
+        }
+        if (!$root) {
+            return self::sanitizeHtmlFallback($value);
+        }
+
+        self::sanitizeDomChildren($root, $allowedTags, $allowedAttrs);
+
+        $clean = '';
+        foreach ($root->childNodes as $child) {
+            $clean .= $doc->saveHTML($child) ?: '';
+        }
+
+        return trim($clean);
     }
+
+    private static function sanitizeDomChildren($node, array $allowedTags, array $allowedAttrs): void
+    {
+        $children = [];
+        foreach ($node->childNodes as $child) {
+            $children[] = $child;
+        }
+
+        foreach ($children as $child) {
+            if (!$child->parentNode) {
+                continue;
+            }
+
+            if ($child->nodeType !== XML_ELEMENT_NODE) {
+                continue;
+            }
+
+            $tag = strtolower($child->nodeName);
+            if (!in_array($tag, $allowedTags, true)) {
+                self::unwrapDomElement($child);
+                continue;
+            }
+
+            self::sanitizeDomChildren($child, $allowedTags, $allowedAttrs);
+            self::sanitizeDomAttributes($child, $allowedAttrs[$tag] ?? [], $tag);
+        }
+    }
+
+    private static function sanitizeDomAttributes($element, array $allowedAttrs, string $tag): void
+    {
+        $attributeNames = [];
+        foreach ($element->attributes as $attribute) {
+            $attributeNames[] = $attribute->name;
+        }
+
+        foreach ($attributeNames as $name) {
+            $lower = strtolower($name);
+            $value = (string) $element->getAttribute($name);
+
+            if (!in_array($lower, $allowedAttrs, true) || str_starts_with($lower, 'on')) {
+                $element->removeAttribute($name);
+                continue;
+            }
+
+            if (in_array($lower, ['href', 'src'], true)) {
+                $isImage = $tag === 'img' && $lower === 'src';
+                if (!self::isSafeHtmlUrl($value, $isImage)) {
+                    $element->removeAttribute($name);
+                }
+                continue;
+            }
+
+            if ($lower === 'target' && !in_array($value, ['_blank', '_self'], true)) {
+                $element->removeAttribute($name);
+                continue;
+            }
+
+            if (in_array($lower, ['width', 'height'], true) && !preg_match('/^[1-9][0-9]{0,3}$/', $value)) {
+                $element->removeAttribute($name);
+                continue;
+            }
+
+            if ($lower === 'loading' && !in_array($value, ['lazy', 'eager'], true)) {
+                $element->removeAttribute($name);
+            }
+        }
+
+        if ($tag === 'a' && $element->getAttribute('target') === '_blank') {
+            $element->setAttribute('rel', 'noopener noreferrer');
+        }
+    }
+
+    private static function unwrapDomElement($element): void
+    {
+        $parent = $element->parentNode;
+        if (!$parent) {
+            return;
+        }
+
+        while ($element->firstChild) {
+            $parent->insertBefore($element->firstChild, $element);
+        }
+        $parent->removeChild($element);
+    }
+
+    private static function isSafeHtmlUrl(string $url, bool $imageOnly = false): bool
+    {
+        $url = trim(html_entity_decode($url, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $url = preg_replace('/[\x00-\x1F\x7F\s]+/', '', $url) ?? '';
+        if ($url === '' || str_starts_with($url, '//')) {
+            return false;
+        }
+
+        if (str_starts_with($url, '#') || str_starts_with($url, '/') || str_starts_with($url, './') || str_starts_with($url, '../')) {
+            return true;
+        }
+
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if ($scheme === '') {
+            return !preg_match('/^[a-z][a-z0-9+.-]*:/i', $url);
+        }
+
+        $allowed = $imageOnly ? ['http', 'https'] : ['http', 'https', 'mailto', 'tel'];
+        return in_array($scheme, $allowed, true);
+    }
+
+    private static function sanitizeHtmlFallback(string $value): string
+    {
+        $value = trim(strip_tags($value, '<p><br><strong><em><ul><ol><li><h2><h3><h4><a><img><blockquote><code><pre>'));
+        $value = preg_replace('/\s+on[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $value) ?? $value;
+        $value = preg_replace('/\s+(href|src|action)\s*=\s*("|\')?\s*(javascript|data|vbscript):[^\s>]*/i', '', $value) ?? $value;
+        return preg_replace('/<\s*\/?\s*(script|style|iframe|object|embed)\b[^>]*>/i', '', $value) ?? $value;
+    }
+
+    /**
+     * Vérifie qu'une valeur appartient à un ENUM de la BDD
+     */
+    public function inEnum(string $field, array $allowedValues, string $label = ''): self
+    {
+        $label = $label ?: $field;
+        if (isset($this->data[$field]) && $this->data[$field] !== '' && $this->data[$field] !== null) {
+            if (!in_array((string) $this->data[$field], $allowedValues, true)) {
+                $this->errors[$field] = "$label must be one of: " . implode(', ', $allowedValues);
+            }
+        }
+        return $this;
+    }
+
+    /** Codes site valides (ENUM core_sites.site_code + recruteur_sites.site) */
+    public const VALID_SITE_CODES = ['formation', 'recrutement', 'medical', 'carriere', 'trainers', 'coaching'];
+
+    /** Statuts recruteur valides */
+    public const RECRUTEUR_STATUSES = ['pending', 'actif', 'suspendu'];
+
+    /** Statuts candidature valides */
+    public const CANDIDATURE_STATUSES = ['recue', 'vue', 'shortlist', 'entretien', 'offre', 'refusee', 'retiree'];
+
+    /** Types de contrat valides */
+    public const CONTRACT_TYPES = ['cdi', 'cdd', 'interim', 'alternance', 'freelance', 'stage'];
 }

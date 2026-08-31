@@ -20,17 +20,19 @@ function registerRecrutementAlertesRoutes(Router $router): void
     });
 
     $router->post('/api/admin/recrutement/alertes', function () {
+        $siteId = Middleware::requireSiteIdFromRequest();
         $admin = Middleware::requireRole(['superadmin', 'admin', 'recruiter']);
         $data = Router::getJsonBody();
         Validator::make($data)->required('candidat_id', 'Candidat')->validate();
 
         $db = getDb();
         $stmt = $db->prepare(
-            'INSERT INTO alertes_emploi (candidat_id, metier_id, mots_cles, ville, rayon_km, type_contrat, frequence, active, created_at)
-             VALUES (:cid, :mid, :mk, :v, :rk, :tc, :freq, :act, NOW())'
+            'INSERT INTO alertes_emploi (candidat_id, site_id, metier_id, mots_cles, ville, rayon_km, type_contrat, frequence, active, created_at)
+             VALUES (:cid, :sid, :mid, :mk, :v, :rk, :tc, :freq, :act, NOW())'
         );
         $stmt->execute([
             ':cid' => $data['candidat_id'],
+            ':sid' => $data['site_id'] ?? $siteId,
             ':mid' => $data['metier_id'] ?? null,
             ':mk' => $data['mots_cles'] ?? null,
             ':v' => $data['ville'] ?? null,
@@ -40,7 +42,7 @@ function registerRecrutementAlertesRoutes(Router $router): void
             ':act' => $data['active'] ?? 1,
         ]);
         $newId = (int) $db->lastInsertId();
-        Audit::log((int) $admin['id'], 1, 'create', 'alerte_emploi', $newId, null, $data);
+        Audit::log((int) $admin['id'], $siteId, 'create', 'alerte_emploi', $newId, null, $data);
         Response::created(['id' => $newId]);
     });
 
